@@ -6,6 +6,7 @@ module Main where
 
 import qualified Graph as G
 import qualified Data.Set as S
+import qualified Data.Map as M
 
 import Data.Bifunctor
 import Control.Parallel
@@ -13,6 +14,29 @@ import Control.Parallel
 main :: IO ()
 main = do
     putStrLn "Hello, Haskell!"
+
+
+type InstrName = String
+
+
+type ParserState = (String, InstrName, M.Map String (G.Graph InstrName))
+
+
+readGraphs :: String -> M.Map String (G.Graph InstrName)
+readGraphs = (\(_,_,v) -> v) . flip (foldl (.) id . fmap one_line . lines) (undefined, undefined, M.empty)
+    where
+        one_line :: String -> ParserState -> ParserState
+        one_line [] k = k
+        one_line ('!':rest) (_   , _ , graphs) = (rest, undefined, M.insert rest G.empty graphs)
+        one_line ('%':rest) (comp, _ , graphs) = (comp, head $ words rest, graphs)
+        one_line ('$':rest) (comp, to, graphs) = (comp, to, M.adjust (G.addEdge from to) comp graphs)
+            where
+                from = head $ words rest
+
+
+
+
+
 
 recPart :: forall v m q . (Ord v, Ord q, Monad m) => (v -> v -> v) -> ((S.Set (v, v), S.Set (v, v)) -> m q) -> G.Graph v -> m (S.Set (v, v), S.Set (v, v))
 recPart merge eval = fmap snd . go (S.empty, S.empty)

@@ -97,6 +97,7 @@ executable RecursivePartitioning
         RecursivePartitioning,
         containers,
         parallel,
+        mtl,
 
     -- Directories containing source files.
     hs-source-dirs:   exe
