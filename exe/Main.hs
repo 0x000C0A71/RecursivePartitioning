@@ -20,7 +20,8 @@ import Data.IORef
 import System.Environment (setEnv, unsetEnv, lookupEnv, getArgs)
 import System.Directory
 
-
+--liftA2 :: Applicative a => (b -> c -> d) -> a b -> a c -> a d
+--liftA2 fn l r = fn <$> l <*> r
 
 data Reg
     = OrigReg String
@@ -79,6 +80,8 @@ main = do
 
 runOn :: FilePath -> [String] -> FilePath -> FilePath -> IO (FuseNoFuses Reg)
 runOn hlo_opt hlo_opt_args workdir hlo_path = do
+    writeFile fusion_log_file ""
+
     prefix_counter <- newCounter
     register_counter <- newCounter
 
@@ -92,12 +95,16 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
         graph_dump_file :: FilePath
         graph_dump_file = workdir ++ "/graph"
 
+        fusion_log_file = workdir ++ "/fusion-log"
+
         eval :: String -> Counter -> FuseNoFuses Reg -> IO Quality
         eval cname pc fnf = do
+            appendFile fusion_log_file $ "Attempting " ++ show fnf ++ "... "
+
             cv <- counterInc pc
             let instr_file = workdir ++ "/fnf" ++ show cv
             let out_file = workdir ++ "/force_out" ++ show cv
-            writeFile instr_file $ encode cname fnf
+            writeFile instr_file $ encode cname $ first reverse  fnf
 
             withEnv "XLA_RPOF_FORCE_FILE" instr_file $ withEnv "XLA_RPOF_QUALITY_FILE" out_file $
                 call_opt
@@ -106,6 +113,8 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
 
             removeFile instr_file
             removeFile out_file
+
+            appendFile fusion_log_file $ show quality ++ "\n"
 
             return quality
 
@@ -147,7 +156,7 @@ type ParserState = (String, Reg, M.Map String (G.Graph Reg))
 
 
 readGraphs :: String -> M.Map String (G.Graph Reg)
-readGraphs = (\(_,_,v) -> v) . flip (foldl (.) id . fmap one_line . lines) (undefined, undefined, M.empty)
+readGraphs = (\(_,_,v) -> v) . flip (foldl (flip (.)) id . fmap one_line . lines) (undefined, undefined, M.empty)
     where
         one_line :: String -> ParserState -> ParserState
         one_line [] k = k

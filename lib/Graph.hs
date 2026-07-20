@@ -44,7 +44,23 @@ removeEdge from to (Graph g) = Graph $ (M.alter remove_from to . M.alter remove_
         remove_to = Just . first (S.delete to) . fromMaybe (S.empty, S.empty)
 
 mergeEdge :: forall v . Ord v => v -> v -> v -> Graph v -> Graph v
-mergeEdge from to merged (Graph g) = undefined
+mergeEdge from to merged (Graph g) = Graph $ foldl (.) id mods g
+    where
+        (from_succs, from_preds) = g ! from
+        (to_succs  , to_preds  ) = g ! to
+
+        to_preds' = S.union from_preds $ S.delete from to_preds
+
+        from_succs' = S.delete to from_succs
+
+        mods = (M.adjust (first  (S.insert merged . S.delete to)) <$> S.toList to_preds')
+            ++ (M.adjust (second (S.insert merged . S.delete to)) <$> S.toList to_succs )
+            ++ (if S.null from_succs' then
+                       (M.adjust (first  (S.delete from)) <$> S.toList from_preds )
+                    ++ (M.adjust (second (S.delete from)) <$> S.toList from_succs')
+                    ++ [M.delete from]
+                else [M.insert from (from_succs', from_preds)])
+            ++ [M.delete to, M.insert merged (to_succs, to_preds')]
 
 getSubgraphs :: forall v . Ord v => Graph v -> [Graph v]
 getSubgraphs (Graph m) = collect $ M.keysSet m
