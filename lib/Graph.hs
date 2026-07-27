@@ -8,6 +8,9 @@ module Graph
     , mergeEdge
     , getSubgraphs
     , getEdges
+    , getSuccessors
+    , getPredecessors
+    , getVertices
 
     , dbgShow
     , dbgVerify
@@ -49,10 +52,15 @@ removeEdge :: forall v . Ord v => v -> v -> Graph v -> Graph v
 removeEdge from to (Graph g) = Graph $ (M.alter remove_from to . M.alter remove_to from) g
     where
         remove_from :: Maybe (S.Set v, S.Set v) -> Maybe (S.Set v, S.Set v)
-        remove_from = Just . second (S.delete from) . fromMaybe (S.empty, S.empty)
+        remove_from = del_if_empty . second (S.delete from) . fromMaybe (S.empty, S.empty)
 
         remove_to :: Maybe (S.Set v, S.Set v) -> Maybe (S.Set v, S.Set v)
-        remove_to = Just . first (S.delete to) . fromMaybe (S.empty, S.empty)
+        remove_to = del_if_empty . first (S.delete to) . fromMaybe (S.empty, S.empty)
+
+        del_if_empty :: (S.Set v, S.Set v) -> Maybe (S.Set v, S.Set v)
+        del_if_empty (ss, sp) = if S.null ss && S.null sp
+            then Nothing
+            else Just (ss, sp)
 
 
 -- | `mergeEdge k v m g` returns `g` with the edge `k` -> `v` "merged" into `m`
@@ -63,7 +71,7 @@ removeEdge from to (Graph g) = Graph $ (M.alter remove_from to . M.alter remove_
 -- results in `k` having no remaining successors, it is also deleted. If, however, any other
 -- vertices remain for which `k` is a predecessor, `k` is kept
 mergeEdge :: forall v . Ord v => v -> v -> v -> Graph v -> Graph v
-mergeEdge from to merged (Graph g) = Graph $ foldl (.) id mods g
+mergeEdge from to merged (Graph g) = Graph $ foldl (flip (.)) id mods g
     where
         (from_succs, from_preds) = g ! from
         (to_succs  , to_preds  ) = g ! to
@@ -79,7 +87,13 @@ mergeEdge from to merged (Graph g) = Graph $ foldl (.) id mods g
                     ++ (M.adjust (second (S.delete from)) <$> S.toList from_succs')
                     ++ [M.delete from]
                 else [M.insert from (from_succs', from_preds)])
-            ++ [M.delete to, M.insert merged (to_succs, to_preds')]
+            ++ [M.delete to, M.insert merged (to_succs, to_preds'), M.alter remove_if_empty merged]
+
+        remove_if_empty Nothing = error "merged should exist"
+        remove_if_empty (Just (ss, sp)) = if S.null ss && S.null sp
+            then Nothing
+            else Just (ss, sp)
+
 
 -- | Given a graph, this function returns all disconnected subgraphs
 getSubgraphs :: forall v . Ord v => Graph v -> [Graph v]
@@ -111,6 +125,20 @@ getEdges (Graph graph) = do
     (from, (tos, _)) <- M.assocs graph
     to <- S.toList tos
     return (from, to)
+
+-- | Returns the successors for a given vertex
+getSuccessors :: forall v . Ord v => Graph v -> v -> [v]
+getSuccessors (Graph graph) = maybe [] (S.toList . fst) . flip M.lookup graph
+
+
+-- | Returns the predecessors for a given vertex
+getPredecessors :: forall v . Ord v => Graph v -> v -> [v]
+getPredecessors (Graph graph) = maybe [] (S.toList . snd) . flip M.lookup graph
+
+-- | Returns all known vertices
+getVertices :: forall v . Graph v -> [v]
+getVertices (Graph g) = M.keys g
+
 
 
 

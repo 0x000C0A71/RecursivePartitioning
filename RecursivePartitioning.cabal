@@ -103,7 +103,8 @@ test-suite Graph-test
     -- Test dependencies.
     build-depends:
         base ^>=4.21.1.0,
-        Graph,
+        HUnit,
+        RecursivePartitioning,
 
 executable RecursivePartitioning
     -- Import common warning flags.
