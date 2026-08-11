@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Graph
     ( Graph()
@@ -11,6 +12,7 @@ module Graph
     , getSuccessors
     , getPredecessors
     , getVertices
+    , getRoutesMaps
 
     , dbgShow
     , dbgVerify
@@ -21,6 +23,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Maybe (fromMaybe)
 import Data.Bifunctor
+import Control.Monad.State
 
 import Data.Map ((!))
 
@@ -139,6 +142,31 @@ getPredecessors (Graph graph) = maybe [] (S.toList . snd) . flip M.lookup graph
 getVertices :: forall v . Graph v -> [v]
 getVertices (Graph g) = M.keys g
 
+
+getRoutesMaps :: forall v . Ord v => Graph v -> (M.Map v Int, M.Map v Int)
+getRoutesMaps (Graph m) = bimap eval eval monads
+    where
+        do_one :: Bool -> v -> State (M.Map v Int) Int
+        do_one forward = go
+            where
+                fn = if forward then snd else fst
+
+                go :: v -> State (M.Map v Int) Int
+                go k = gets (M.lookup k) >>= \case
+                    Just n  -> return n
+                    Nothing -> do
+                        let recs = fn $ m ! k
+                        this <- S.fold (\neighbor prev -> (+) <$> prev <*> go neighbor) (return 1) recs
+                        modify $ M.insert k this
+                        return this
+
+        monads :: (State (M.Map v Int) Int, State (M.Map v Int) Int)
+        monads = S.fold fld (return undefined, return undefined) $ M.keysSet m
+            where
+                fld k = bimap (>> do_one True k) (>> do_one False k)
+
+        eval :: State (M.Map v Int) a -> M.Map v Int
+        eval = flip execState M.empty
 
 
 

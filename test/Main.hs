@@ -11,6 +11,8 @@ import System.IO.Unsafe (unsafePerformIO)
 import GHC.Exts (sortWith)
 import Control.Monad (zipWithM_)
 
+import qualified Data.Map as M
+
 type Reg = String
 
 assertEdges :: [(Reg, Reg)] -> G.Graph Reg -> Assertion
@@ -46,6 +48,13 @@ assertSubgraphVerts verts g = do
 assertSubgraphInvariants :: G.Graph Reg -> Assertion
 assertSubgraphInvariants = mapM_ assertInvariants . G.getSubgraphs
 
+assertRoutes :: Reg -> (Int, Int) -> G.Graph Reg -> Assertion
+assertRoutes k (into, out) g = do
+    assertEqual "Routes into" (Just into) $ M.lookup k intos
+    assertEqual "Routes out of" (Just out) $ M.lookup k outs
+    where
+        (intos, outs) = G.getRoutesMaps g
+
 main :: IO Counts
 main = runTestTT allTests
 
@@ -66,6 +75,7 @@ allTests = TestList
     , getSubgraphs
     , getSuccessors
     , getPredecessors
+    , getRoutesMaps
     ]
     where
         empty = TestLabel "empty" $ TestList
@@ -366,6 +376,23 @@ allTests = TestList
 
         getPredecessors = TestLabel "getPredecessors" $ TestList
             [ graphTest "absent vertex" [] [ assertPreds "a" [] ]
+            ]
+
+        getRoutesMaps = TestLabel "getRoutesMaps" $ TestList
+            [ graphTest "sanity check"
+                [ G.addEdge "a" "b"
+                ]
+                [ assertRoutes "a" (1, 2)
+                , assertRoutes "b" (2, 1)
+                ]
+            , graphTest "pre split"
+                [ G.addEdge "a" "b"
+                , G.addEdge "a" "c"
+                , G.addEdge "b" "d"
+                , G.addEdge "c" "d"
+                ]
+                [ assertRoutes "d" (5, 1)
+                ]
             ]
 
 

@@ -71,6 +71,7 @@ library
     build-depends:
         base >=4.13.0.0,
         containers,
+        mtl,
 
     -- Directories containing source files.
     hs-source-dirs:   lib
@@ -105,6 +106,7 @@ test-suite Graph-test
         base ^>=4.21.1.0,
         HUnit,
         RecursivePartitioning,
+        containers,
 
 executable RecursivePartitioning
     -- Import common warning flags.

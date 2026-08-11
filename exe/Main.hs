@@ -19,6 +19,7 @@ import System.Process
 import Data.IORef
 import System.Environment (setEnv, unsetEnv, lookupEnv, getArgs)
 import System.Directory
+import Data.Foldable (minimumBy)
 
 --liftA2 :: Applicative a => (b -> c -> d) -> a b -> a c -> a d
 --liftA2 fn l r = fn <$> l <*> r
@@ -252,9 +253,15 @@ recPart merge eval = fmap snd . go ([], S.empty)
                     then (split_quality, split_sets)
                     else (merged_quality, merged_sets)
 
-        -- TODO: be more clever
         pick_edge :: G.Graph v -> Maybe (v, v)
         pick_edge g = case G.getEdges g of
             []    -> Nothing
-            (e:_) -> Just e
+            edges -> Just $ minimumWith evalEdge edges
+            where
+                (intos, outs) = G.getRoutesMaps g
+
+                evalEdge (f, t) = abs $ (intos M.! f) - (outs M.! t)
+
+                minimumWith :: (Ord b, Foldable t) => (a -> b) -> t a -> a
+                minimumWith fn = minimumBy $ \l r -> compare (fn l) (fn r)
 
