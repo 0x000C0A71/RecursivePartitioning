@@ -253,12 +253,23 @@ recPart merge eval = fmap snd . go ([], S.empty)
                     then (split_quality, split_sets)
                     else (merged_quality, merged_sets)
 
+        -- | The whole algorithm "chops" one edge away each iteration,
+        -- hoping to "chop" the graph in half. This function "aims" the
+        -- "axe". The main goal is to "chop" the graph in two as fast as
+        -- possible because that's where the speedup comes from.
+        -- `pick_edges` uses the "mass" heuristic, trying to find the edge
+        -- which has the lowest "mass"-difference (upstream "mass" of
+        -- producer minus downstream "mass" of consumer). While this "mass"
+        -- metric is relatively bad for getting equally-sized halves, it is
+        -- rather quick to compute, and the idea is, to instead of finding
+        -- the perfect place to "chop", we just "roughly aim for the center",
+        -- and will probably get two parts rather quickly.
         pick_edge :: G.Graph v -> Maybe (v, v)
         pick_edge g = case G.getEdges g of
             []    -> Nothing
             edges -> Just $ minimumWith evalEdge edges
             where
-                (intos, outs) = G.getRoutesMaps g
+                (intos, outs) = G.getMassMaps g
 
                 evalEdge (f, t) = abs $ (intos M.! f) - (outs M.! t)
 

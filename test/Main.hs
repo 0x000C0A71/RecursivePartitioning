@@ -48,12 +48,12 @@ assertSubgraphVerts verts g = do
 assertSubgraphInvariants :: G.Graph Reg -> Assertion
 assertSubgraphInvariants = mapM_ assertInvariants . G.getSubgraphs
 
-assertRoutes :: Reg -> (Int, Int) -> G.Graph Reg -> Assertion
-assertRoutes k (into, out) g = do
+assertMasses :: Reg -> (Int, Int) -> G.Graph Reg -> Assertion
+assertMasses k (into, out) g = do
     assertEqual "Routes into" (Just into) $ M.lookup k intos
     assertEqual "Routes out of" (Just out) $ M.lookup k outs
     where
-        (intos, outs) = G.getRoutesMaps g
+        (intos, outs) = G.getMassMaps g
 
 main :: IO Counts
 main = runTestTT allTests
@@ -75,7 +75,7 @@ allTests = TestList
     , getSubgraphs
     , getSuccessors
     , getPredecessors
-    , getRoutesMaps
+    , getMassMaps
     ]
     where
         empty = TestLabel "empty" $ TestList
@@ -378,12 +378,12 @@ allTests = TestList
             [ graphTest "absent vertex" [] [ assertPreds "a" [] ]
             ]
 
-        getRoutesMaps = TestLabel "getRoutesMaps" $ TestList
+        getMassMaps = TestLabel "getMassMaps" $ TestList
             [ graphTest "sanity check"
                 [ G.addEdge "a" "b"
                 ]
-                [ assertRoutes "a" (1, 2)
-                , assertRoutes "b" (2, 1)
+                [ assertMasses "a" (0, 1)
+                , assertMasses "b" (1, 0)
                 ]
             , graphTest "pre split"
                 [ G.addEdge "a" "b"
@@ -391,7 +391,32 @@ allTests = TestList
                 , G.addEdge "b" "d"
                 , G.addEdge "c" "d"
                 ]
-                [ assertRoutes "d" (5, 1)
+                [ assertMasses "d" (4, 0)
+                ]
+            , graphTest "lattice"
+                --     d2
+                --    / \
+                --   b1  g8
+                --  / \ / \
+                -- a0  e4  i18
+                --  \ / \ /
+                --   c1  h8
+                --    \ /
+                --     f2
+                [ G.addEdge "a" "b"
+                , G.addEdge "a" "c"
+                , G.addEdge "b" "d"
+                , G.addEdge "b" "e"
+                , G.addEdge "c" "e"
+                , G.addEdge "c" "f"
+                , G.addEdge "d" "g"
+                , G.addEdge "e" "g"
+                , G.addEdge "e" "h"
+                , G.addEdge "f" "h"
+                , G.addEdge "g" "i"
+                , G.addEdge "h" "i"
+                ]
+                [ assertMasses "i" (18, 0)
                 ]
             ]
 

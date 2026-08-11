@@ -12,7 +12,7 @@ module Graph
     , getSuccessors
     , getPredecessors
     , getVertices
-    , getRoutesMaps
+    , getMassMaps
 
     , dbgShow
     , dbgVerify
@@ -142,9 +142,19 @@ getPredecessors (Graph graph) = maybe [] (S.toList . snd) . flip M.lookup graph
 getVertices :: forall v . Graph v -> [v]
 getVertices (Graph g) = M.keys g
 
-
-getRoutesMaps :: forall v . Ord v => Graph v -> (M.Map v Int, M.Map v Int)
-getRoutesMaps (Graph m) = bimap eval eval monads
+-- | ONLY WORKS FOR DAGS
+-- For each vertex, computes a "mass" upstream and downstream of the vertex
+-- e.g. upstream "mass" for a given vertex is the sum of the "masses" of all
+-- its predecessors plus the number of edges by which those predecessors are
+-- connected. (So sum of predecessor masses + number of incomming edges)
+-- downstream "mass" works the same but reversed
+--
+-- Runs in O(nm) for n vertices and m edges
+--
+-- returns a map for upstream and downstream "mass" each of each vertex as
+-- (<upstream map>, <downstream map>)
+getMassMaps :: forall v . Ord v => Graph v -> (M.Map v Int, M.Map v Int)
+getMassMaps (Graph m) = bimap eval eval monads
     where
         do_one :: Bool -> v -> State (M.Map v Int) Int
         do_one forward = go
@@ -156,7 +166,7 @@ getRoutesMaps (Graph m) = bimap eval eval monads
                     Just n  -> return n
                     Nothing -> do
                         let recs = fn $ m ! k
-                        this <- S.fold (\neighbor prev -> (+) <$> prev <*> go neighbor) (return 1) recs
+                        this <- S.fold (\neighbor prev -> (+) <$> prev <*> go neighbor) (return $ S.size recs) recs
                         modify $ M.insert k this
                         return this
 
