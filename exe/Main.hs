@@ -106,10 +106,13 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
             let out_file = workdir ++ "/force_out" ++ show cv
             writeFile instr_file $ encode cname $ first reverse  fnf
 
-            withEnv "XLA_RPOF_FORCE_FILE" instr_file $ withEnv "XLA_RPOF_QUALITY_FILE" out_file $
+            withEnv "XLA_RPOF_FORCE_FILE" instr_file $ withEnv "XLA_RPOF_QUALITY_FILE" out_file $ withEnv "XLA_RPOF_COMPUTATION" cname
                 call_opt
 
-            quality <- read . head . lines <$> readFile out_file
+            raw_stats :: [Int] <- fmap read . lines <$> readFile out_file
+            appendFile fusion_log_file $ "stats: " ++ show raw_stats
+            let [leaf_instrs, num_kernels, num_launches, bytes_read, bytes_written, flops, exec_nanos] :: [Float] = fromIntegral <$> raw_stats
+            let quality = 1.0/exec_nanos
 
             removeFile instr_file
             removeFile out_file
