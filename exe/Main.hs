@@ -88,6 +88,8 @@ main = do
 
 runOn :: FilePath -> [String] -> FilePath -> FilePath -> IO (FuseNoFuses Reg)
 runOn hlo_opt hlo_opt_args workdir hlo_path = do
+    createDirectoryIfMissing True opt_logs
+
     writeFile fusion_log_file ""
 
     withEnv "XLA_RPOF_FORWARD_FILE" graph_dump_file $
@@ -136,10 +138,13 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
         call_opt :: String -> IO ()
         call_opt suffix = --callProcess hlo_opt $ hlo_opt_args ++ [hlo_path]
             withFile opt_out WriteMode $ \opt_out_hdl -> withFile opt_err WriteMode $ \opt_err_hdl -> do
-                (_, _, _, process_handle) <- createProcess_ "call_opt" $ create_process opt_out_hdl opt_err_hdl
+                let cp = create_process opt_out_hdl opt_err_hdl
+                (_, _, _, process_handle) <- createProcess_ "call_opt" cp
                 waitForProcess process_handle >>= \case
                     ExitSuccess -> return ()
-                    ExitFailure e -> error $ "opt failed with exit code " ++ show e ++ ". Logs at " ++ opt_out ++ " & " ++ opt_err
+                    ExitFailure e -> do
+                        print cp
+                        error $ "opt failed with exit code " ++ show e ++ ". Logs at " ++ opt_out ++ " & " ++ opt_err
             where
                 create_process :: Handle -> Handle -> CreateProcess
                 create_process opt_out_hdl opt_err_hdl = (proc hlo_opt $ hlo_opt_args ++ [hlo_path])
