@@ -86,6 +86,14 @@ main = do
     fnf <- runOn hlo_opt hlo_opt_args workdir hlo_path
     print fnf
 
+
+data LogMsg
+    = LogEval (FuseNoFuses Reg) [Int] Quality
+    | LogEnd
+    | LogNoOutput String
+    deriving (Show)
+
+
 runOn :: FilePath -> [String] -> FilePath -> FilePath -> IO (FuseNoFuses Reg)
 runOn hlo_opt hlo_opt_args workdir hlo_path = do
     createDirectoryIfMissing True opt_logs
@@ -107,7 +115,7 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
 
         fusion_log_file = workdir ++ "/fusion-log"
 
-        eval :: Chan (FuseNoFuses Reg, [Int], Quality) -> String -> Unique -> FuseNoFuses Reg -> IO Quality
+        eval :: Chan LogMsg -> String -> Unique -> FuseNoFuses Reg -> IO Quality
         eval log_channel cname unique fnf = do
 
             let instr_file = workdir ++ "/fnf" ++ show unique
@@ -117,16 +125,25 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
             withEnv "XLA_RPOF_FORCE_FILE" instr_file $ withEnv "XLA_RPOF_QUALITY_FILE" out_file $ withEnv "XLA_RPOF_COMPUTATION" cname $
                 call_opt $ "eval-" ++ show unique
 
-            raw_stats :: [Int] <- fmap read . lines <$> readFile out_file
-            let [leaf_instrs, num_kernels, num_launches, bytes_read, bytes_written, flops, exec_nanos] :: [Float] = fromIntegral <$> raw_stats
-            let quality = 1.0/exec_nanos
 
-            removeFile instr_file
-            removeFile out_file
+            doesFileExist out_file >>= \case
+                True -> do
+                    raw_stats :: [Int] <- fmap read . lines <$> readFile out_file
+                    let [leaf_instrs, num_kernels, num_launches, bytes_read, bytes_written, flops, exec_nanos] :: [Float] = fromIntegral <$> raw_stats
+                    let quality = 1.0/exec_nanos
 
-            writeChan log_channel (fnf, raw_stats, quality)
+                    removeFile instr_file
+                    removeFile out_file
 
-            return quality
+                    writeChan log_channel $ LogEval fnf raw_stats quality
+
+                    return quality
+                False -> do
+                    writeChan log_channel $ LogNoOutput $ show unique
+                    return 0
+
+
+
 
         merge :: Unique -> Reg -> Reg -> IO (Reg, Unique)
         merge u _ _ = return (RenameReg $ "tmp" ++ show u, u')
@@ -156,11 +173,13 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
                 opt_out = opt_logs ++ "/opt-stdout-" ++ suffix
                 opt_err = opt_logs ++ "/opt-stderr-" ++ suffix
 
-        log_thread :: Chan (FuseNoFuses Reg, [Int], Quality) -> IO ()
-        log_thread c = getChanContents c >>= mapM_ fun
-            where
-                fun :: (FuseNoFuses Reg, [Int], Quality) -> IO ()
-                fun (fnf, metrics, qual) = putStrLn $ show fnf ++ " " ++ show metrics ++ " yielded: " ++ show qual
+        log_thread :: Chan LogMsg -> IO ()
+        log_thread c = readChan c >>= \case
+            LogEnd -> return ()
+            other -> (>> log_thread c) $ case other of
+                LogEval fnf metrics qual -> putStrLn $ show fnf ++ " " ++ show metrics ++ " yielded: " ++ show qual
+                LogNoOutput suff -> putStrLn $ "!!! " ++ suff ++ " produced no output! Inspect!"
+
 
 
 
