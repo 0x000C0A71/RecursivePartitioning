@@ -21,6 +21,11 @@ import System.Environment (setEnv, unsetEnv, lookupEnv, getArgs)
 import System.Directory
 import Data.Foldable (minimumBy)
 
+import Control.Concurrent.Async
+
+import Unique
+import Control.Monad
+
 --liftA2 :: Applicative a => (b -> c -> d) -> a b -> a c -> a d
 --liftA2 fn l r = fn <$> l <*> r
 
@@ -83,28 +88,24 @@ runOn :: FilePath -> [String] -> FilePath -> FilePath -> IO (FuseNoFuses Reg)
 runOn hlo_opt hlo_opt_args workdir hlo_path = do
     writeFile fusion_log_file ""
 
-    prefix_counter <- newCounter
-    register_counter <- newCounter
-
     withEnv "XLA_RPOF_FORWARD_FILE" graph_dump_file $
         call_opt
 
     [(compname, graph)] <- M.toList . readGraphs <$> readFile graph_dump_file
 
-    recPart (merge register_counter) (eval compname prefix_counter) graph
+    recPart merge (eval compname) graph
     where
         graph_dump_file :: FilePath
         graph_dump_file = workdir ++ "/graph"
 
         fusion_log_file = workdir ++ "/fusion-log"
 
-        eval :: String -> Counter -> FuseNoFuses Reg -> IO Quality
-        eval cname pc fnf = do
+        eval :: String -> Unique -> FuseNoFuses Reg -> IO Quality
+        eval cname unique fnf = do
             appendFile fusion_log_file $ "Attempting " ++ show fnf ++ "... "
 
-            cv <- counterInc pc
-            let instr_file = workdir ++ "/fnf" ++ show cv
-            let out_file = workdir ++ "/force_out" ++ show cv
+            let instr_file = workdir ++ "/fnf" ++ show unique
+            let out_file = workdir ++ "/force_out" ++ show unique
             writeFile instr_file $ encode cname $ first reverse  fnf
 
             withEnv "XLA_RPOF_FORCE_FILE" instr_file $ withEnv "XLA_RPOF_QUALITY_FILE" out_file $ withEnv "XLA_RPOF_COMPUTATION" cname
@@ -122,8 +123,10 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
 
             return quality
 
-        merge :: Counter -> Reg -> Reg -> IO Reg
-        merge rc _ _ = RenameReg . ("tmp" ++) . show <$> counterInc rc
+        merge :: Unique -> Reg -> Reg -> IO (Reg, Unique)
+        merge u _ _ = return (RenameReg $ "tmp" ++ show u, u')
+            where
+                u' = next u
 
         call_opt :: IO ()
         call_opt = callProcess hlo_opt $ hlo_opt_args ++ [hlo_path]
@@ -173,49 +176,33 @@ readGraphs = (\(_,_,v) -> v) . flip (foldl (flip (.)) id . fmap one_line . lines
 
 
 
-class Monad m => MPar m where
-    mpar :: m a -> m b -> m (a, b)
-    mpar = liftA2 (,)
 
-    parseq :: [m a] -> m [a]
-    parseq [] = return []
-    parseq [x] = (:[]) <$> x
-    parseq (x:xs) = uncurry (:) <$> mpar x (parseq xs)
+class Monad m => MonadPar m where
+    par2 :: (m a, m b) -> m (a, b)
+    parList :: [m a] -> m [a]
 
+    par3 :: (m a, m b, m c) -> m (a, b, c)
+    par3 (a, b, c) = flip fmap (par2 (par2 (a, b), c)) $ \((a', b'), c') -> (a', b', c')
 
+    par4 :: (m a, m b, m c, m d) -> m (a, b, c, d)
+    par4 (a, b, c, d) = flip fmap (par2 (par2 (a, b), par2 (c, d))) $ \((a', b'), (c', d')) -> (a', b', c', d')
 
-data Future a = Future (MVar a) ThreadId
+    par5 :: (m a, m b, m c, m d, m e) -> m (a, b, c, d, e)
+    par5 (a, b, c, d, e) = flip fmap (par2 (par4 (a, b, c, d), e)) $ \((a', b', c', d'), e') -> (a', b', c', d', e')
 
-futureAwait :: Future a -> IO a
-futureAwait (Future mv _) = readMVar mv
+instance MonadPar IO where
+    par2 (act1, act2) = withAsync act1 $ \thread1 -> withAsync act2 $ \thread2 -> do
+        res1 <- wait thread1
+        res2 <- wait thread2
+        return (res1, res2)
 
-futureCancel :: Future a -> IO ()
-futureCancel (Future _ ti) = killThread ti
+    parList = mapConcurrently id
 
-async :: IO a -> IO (Future a)
-async act = do
-    mv <- newEmptyMVar
-    ti <- forkFinally act $ \case
-        Right v -> putMVar mv v
-        Left e  -> putMVar mv $ error "async exception"
-    return $ Future mv ti
-
-awaitAll :: [Future a] -> IO [a]
-awaitAll = mapM futureAwait
-
-instance MPar IO where
-    mpar l r = do
-        fl <- async l
-        fr <- async r
-        vl <- futureAwait fl
-        vr <- futureAwait fr
-        return (vl, vr)
-
-    parseq v = do
-        fs <- mapM async v
-        awaitAll fs
-
-
+--newtype MonadParT m a = MonadParT (m a)
+--    deriving (Functor, Applicative, Monad)
+--
+--instance Monad m => MonadPar (MonadParT m) where
+--    par2 = uncurry $ liftA2 (,)
 
 data HloModule
 
@@ -229,26 +216,28 @@ type Fusion v = (v, v, v)
 type NoFusion v = (v, v)
 type FuseNoFuses v = ([Fusion v], S.Set (NoFusion v))
 
-recPart :: forall v m q . (Ord v, Ord q, Monad m) => (v -> v -> m v) -> (FuseNoFuses v -> m q) -> G.Graph v -> m (FuseNoFuses v)
-recPart merge eval = fmap snd . go ([], S.empty)
+recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m) => (Unique -> v -> v -> m (v, Unique)) -> (Unique -> FuseNoFuses v -> m q) -> G.Graph v -> m (FuseNoFuses v)
+recPart merge eval = fmap snd . go ([], S.empty) newUnique
     where
-        go :: FuseNoFuses v -> G.Graph v -> m (q, FuseNoFuses v)
-        go !f !g = case pick_edge g of
-            Nothing -> (,f) <$> eval f
+        go :: FuseNoFuses v -> Unique -> G.Graph v -> m (q, FuseNoFuses v)
+        go !f !u !g = case pick_edge g of
+            Nothing -> (,f) <$> eval u f
             Just (from, to) -> do
-                merged <- merge from to
+                (merged, u') <- merge u from to
 
                 let with_merged = first ((from, to, merged):) f
                 let with_split = second (S.insert (from, to)) f
 
-                (merged_quality, merged_sets) <- go with_merged $ G.mergeEdge from to merged g
-                (split_quality , split_sets ) <- case G.getSubgraphs $ G.removeEdge from to g of
-                    [x] -> go with_split x
+                let (u'', um, us) = split3 u'
+                let merged_act = go with_merged um $ G.mergeEdge from to merged g
+                ((merged_quality, merged_sets), (split_quality , split_sets)) <- case G.getSubgraphs $ G.removeEdge from to g of
+                    [x] -> par2 (merged_act, go with_split us x)
                     xs -> do
-                        rec_results <- go with_split `mapM` xs
+                        let split_acts = zipWith (go with_split) (split (length xs) us) xs
+                        (mres, rec_results) <- par2 (merged_act, parList split_acts)
                         let sets = bimap concat S.unions $ unzip $ snd <$> rec_results
-                        quality <- eval sets
-                        return (quality, sets)
+                        quality <- eval u'' sets
+                        return (mres, (quality, sets))
                 return $ if split_quality > merged_quality
                     then (split_quality, split_sets)
                     else (merged_quality, merged_sets)
