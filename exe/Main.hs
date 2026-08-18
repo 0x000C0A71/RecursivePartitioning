@@ -25,6 +25,8 @@ import Control.Concurrent.Async
 
 import Unique
 import Control.Monad
+import System.IO (Handle, withFile, IOMode (WriteMode))
+import System.Exit (ExitCode(..))
 
 --liftA2 :: Applicative a => (b -> c -> d) -> a b -> a c -> a d
 --liftA2 fn l r = fn <$> l <*> r
@@ -89,7 +91,7 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
     writeFile fusion_log_file ""
 
     withEnv "XLA_RPOF_FORWARD_FILE" graph_dump_file $
-        call_opt
+        call_opt $ "forward-pass"
 
     [(compname, graph)] <- M.toList . readGraphs <$> readFile graph_dump_file
 
@@ -108,8 +110,8 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
             let out_file = workdir ++ "/force_out" ++ show unique
             writeFile instr_file $ encode cname $ first reverse  fnf
 
-            withEnv "XLA_RPOF_FORCE_FILE" instr_file $ withEnv "XLA_RPOF_QUALITY_FILE" out_file $ withEnv "XLA_RPOF_COMPUTATION" cname
-                call_opt
+            withEnv "XLA_RPOF_FORCE_FILE" instr_file $ withEnv "XLA_RPOF_QUALITY_FILE" out_file $ withEnv "XLA_RPOF_COMPUTATION" cname $
+                call_opt $ "eval-" ++ show unique
 
             raw_stats :: [Int] <- fmap read . lines <$> readFile out_file
             appendFile fusion_log_file $ "stats: " ++ show raw_stats
@@ -128,8 +130,25 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
             where
                 u' = next u
 
-        call_opt :: IO ()
-        call_opt = callProcess hlo_opt $ hlo_opt_args ++ [hlo_path]
+        opt_logs :: FilePath
+        opt_logs = workdir ++ "/opt-logs"
+
+        call_opt :: String -> IO ()
+        call_opt suffix = --callProcess hlo_opt $ hlo_opt_args ++ [hlo_path]
+            withFile opt_out WriteMode $ \opt_out_hdl -> withFile opt_err WriteMode $ \opt_err_hdl -> do
+                (_, _, _, process_handle) <- createProcess_ "call_opt" $ create_process opt_out_hdl opt_err_hdl
+                waitForProcess process_handle >>= \case
+                    ExitSuccess -> return ()
+                    ExitFailure e -> error $ "opt failed with exit code " ++ show e ++ ". Logs at " ++ opt_out ++ " & " ++ opt_err
+            where
+                create_process :: Handle -> Handle -> CreateProcess
+                create_process opt_out_hdl opt_err_hdl = (proc hlo_opt $ hlo_opt_args ++ [hlo_path])
+                    { std_out = UseHandle opt_out_hdl
+                    , std_err = UseHandle opt_err_hdl
+                    }
+
+                opt_out = opt_logs ++ "/opt-stdout-" ++ suffix
+                opt_err = opt_logs ++ "/opt-stderr-" ++ suffix
 
 
 
