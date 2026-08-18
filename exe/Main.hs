@@ -17,7 +17,7 @@ import Control.Monad.State
 
 import System.Process
 import Data.IORef
-import System.Environment (setEnv, unsetEnv, lookupEnv, getArgs)
+import System.Environment (setEnv, unsetEnv, lookupEnv, getArgs, getEnvironment)
 import System.Directory
 import Data.Foldable (minimumBy)
 
@@ -100,30 +100,36 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
 
     log_channel <- newChan
 
+    base_env <- getEnvironment
+
     writeFile fusion_log_file ""
 
-    withEnv "XLA_RPOF_FORWARD_FILE" graph_dump_file $
-        call_opt $ "forward-pass"
+    call_opt "forward-pass" $ ("XLA_RPOF_FORWARD_FILE", graph_dump_file) : base_env
 
     [(compname, graph)] <- M.toList . readGraphs <$> readFile graph_dump_file
 
-    withAsync (log_thread log_channel) $ const $
-        recPart merge (eval log_channel compname) graph
+    withAsync (log_thread log_channel) $ \logger -> do
+        res <- recPart merge (eval base_env log_channel compname) graph
+        wait logger
+        return res
     where
         graph_dump_file :: FilePath
         graph_dump_file = workdir ++ "/graph"
 
         fusion_log_file = workdir ++ "/fusion-log"
 
-        eval :: Chan LogMsg -> String -> Unique -> FuseNoFuses Reg -> IO Quality
-        eval log_channel cname unique fnf = do
+        eval :: [(String, String)] -> Chan LogMsg -> String -> Unique -> FuseNoFuses Reg -> IO Quality
+        eval base_env log_channel cname unique fnf = do
 
             let instr_file = workdir ++ "/fnf" ++ show unique
             let out_file = workdir ++ "/force_out" ++ show unique
             writeFile instr_file $ encode cname $ first reverse  fnf
 
-            withEnv "XLA_RPOF_FORCE_FILE" instr_file $ withEnv "XLA_RPOF_QUALITY_FILE" out_file $ withEnv "XLA_RPOF_COMPUTATION" cname $
-                call_opt $ "eval-" ++ show unique
+            call_opt ("eval-" ++ show unique)
+                $ ("XLA_RPOF_FORCE_FILE"  , instr_file)
+                : ("XLA_RPOF_QUALITY_FILE", out_file)
+                : ("XLA_RPOF_COMPUTATION" , cname)
+                : base_env
 
 
             doesFileExist out_file >>= \case
@@ -153,8 +159,8 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
         opt_logs :: FilePath
         opt_logs = workdir ++ "/opt-logs"
 
-        call_opt :: String -> IO ()
-        call_opt suffix = --callProcess hlo_opt $ hlo_opt_args ++ [hlo_path]
+        call_opt :: String -> [(String, String)] -> IO ()
+        call_opt suffix env = --callProcess hlo_opt $ hlo_opt_args ++ [hlo_path]
             withFile opt_out WriteMode $ \opt_out_hdl -> withFile opt_err WriteMode $ \opt_err_hdl -> do
                 let cp = create_process opt_out_hdl opt_err_hdl
                 (_, _, _, process_handle) <- createProcess_ "call_opt" cp
@@ -168,6 +174,7 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
                 create_process opt_out_hdl opt_err_hdl = (proc hlo_opt $ hlo_opt_args ++ [hlo_path])
                     { std_out = UseHandle opt_out_hdl
                     , std_err = UseHandle opt_err_hdl
+                    , env     = Just env
                     }
 
                 opt_out = opt_logs ++ "/opt-stdout-" ++ suffix
