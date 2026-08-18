@@ -90,6 +90,8 @@ runOn :: FilePath -> [String] -> FilePath -> FilePath -> IO (FuseNoFuses Reg)
 runOn hlo_opt hlo_opt_args workdir hlo_path = do
     createDirectoryIfMissing True opt_logs
 
+    log_channel <- newChan
+
     writeFile fusion_log_file ""
 
     withEnv "XLA_RPOF_FORWARD_FILE" graph_dump_file $
@@ -97,16 +99,16 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
 
     [(compname, graph)] <- M.toList . readGraphs <$> readFile graph_dump_file
 
-    recPart merge (eval compname) graph
+    withAsync (log_thread log_channel) $ const $
+        recPart merge (eval log_channel compname) graph
     where
         graph_dump_file :: FilePath
         graph_dump_file = workdir ++ "/graph"
 
         fusion_log_file = workdir ++ "/fusion-log"
 
-        eval :: String -> Unique -> FuseNoFuses Reg -> IO Quality
-        eval cname unique fnf = do
-            appendFile fusion_log_file $ "Attempting " ++ show fnf ++ "... "
+        eval :: Chan (FuseNoFuses Reg, [Int], Quality) -> String -> Unique -> FuseNoFuses Reg -> IO Quality
+        eval log_channel cname unique fnf = do
 
             let instr_file = workdir ++ "/fnf" ++ show unique
             let out_file = workdir ++ "/force_out" ++ show unique
@@ -116,14 +118,13 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
                 call_opt $ "eval-" ++ show unique
 
             raw_stats :: [Int] <- fmap read . lines <$> readFile out_file
-            appendFile fusion_log_file $ "stats: " ++ show raw_stats
             let [leaf_instrs, num_kernels, num_launches, bytes_read, bytes_written, flops, exec_nanos] :: [Float] = fromIntegral <$> raw_stats
             let quality = 1.0/exec_nanos
 
             removeFile instr_file
             removeFile out_file
 
-            appendFile fusion_log_file $ show quality ++ "\n"
+            writeChan log_channel (fnf, raw_stats, quality)
 
             return quality
 
@@ -154,6 +155,12 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
 
                 opt_out = opt_logs ++ "/opt-stdout-" ++ suffix
                 opt_err = opt_logs ++ "/opt-stderr-" ++ suffix
+
+        log_thread :: Chan (FuseNoFuses Reg, [Int], Quality) -> IO ()
+        log_thread c = getChanContents c >>= mapM_ fun
+            where
+                fun :: (FuseNoFuses Reg, [Int], Quality) -> IO ()
+                fun (fnf, metrics, qual) = putStrLn $ show fnf ++ " " ++ show metrics ++ " yielded: " ++ show qual
 
 
 
