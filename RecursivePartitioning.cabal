@@ -133,6 +133,8 @@ executable RecursivePartitioning
         directory,
         async,
 
+    ghc-options: -threaded
+
     -- Directories containing source files.
     hs-source-dirs:   exe
 
