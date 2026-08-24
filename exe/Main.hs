@@ -110,7 +110,7 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
 
     withAsync (log_thread log_channel) $ \logger -> do
         res <- recPart merge (eval base_env log_channel compname) graph
-        writeChan LogEnd
+        writeChan log_channel LogEnd
         wait logger
         return res
     where
