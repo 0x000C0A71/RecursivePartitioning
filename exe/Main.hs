@@ -32,6 +32,7 @@ import System.Exit (ExitCode(..))
 import Control.Monad.Reader
 import System.Random (RandomGen, uniformR, StdGen, mkStdGen)
 import qualified System.Random as R
+import GHC.Conc (numCapabilities)
 
 --liftA2 :: Applicative a => (b -> c -> d) -> a b -> a c -> a d
 --liftA2 fn l r = fn <$> l <*> r
@@ -87,8 +88,9 @@ main = do
 
     workdir <- getCurrentDirectory >>= makeAbsolute
 
+    let max_budget = fromIntegral $ numCapabilities * 4
 
-    fnf <- runOn 3 hlo_opt hlo_opt_args workdir hlo_path
+    fnf <- runOn max_budget hlo_opt hlo_opt_args workdir hlo_path
     print fnf
 
 
@@ -113,7 +115,7 @@ runOn thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
 
     [(compname, graph)] <- M.toList . readGraphs <$> readFile graph_dump_file
 
-    let compute = recPart (mkStdGen 0xcafebabe) merge (eval base_env log_channel compname) graph
+    let compute = recPart (mkStdGen 0xC0A71) merge (eval base_env log_channel compname) graph
 
     withAsync (log_thread log_channel) $ \logger -> do
         res <- runReaderT compute thread_budget
