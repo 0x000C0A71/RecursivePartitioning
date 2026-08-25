@@ -2,6 +2,8 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Main where
 
@@ -27,6 +29,9 @@ import Unique
 import Control.Monad
 import System.IO (Handle, withFile, IOMode (WriteMode))
 import System.Exit (ExitCode(..))
+import Control.Monad.Reader
+import System.Random (RandomGen, uniformR, StdGen, mkStdGen)
+import qualified System.Random as R
 
 --liftA2 :: Applicative a => (b -> c -> d) -> a b -> a c -> a d
 --liftA2 fn l r = fn <$> l <*> r
@@ -83,7 +88,7 @@ main = do
     workdir <- getCurrentDirectory >>= makeAbsolute
 
 
-    fnf <- runOn hlo_opt hlo_opt_args workdir hlo_path
+    fnf <- runOn 3 hlo_opt hlo_opt_args workdir hlo_path
     print fnf
 
 
@@ -94,8 +99,8 @@ data LogMsg
     deriving (Show)
 
 
-runOn :: FilePath -> [String] -> FilePath -> FilePath -> IO (FuseNoFuses Reg)
-runOn hlo_opt hlo_opt_args workdir hlo_path = do
+runOn :: Budget -> FilePath -> [String] -> FilePath -> FilePath -> IO (FuseNoFuses Reg)
+runOn thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
     createDirectoryIfMissing True opt_logs
 
     log_channel <- newChan
@@ -108,8 +113,10 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
 
     [(compname, graph)] <- M.toList . readGraphs <$> readFile graph_dump_file
 
+    let compute = recPart (mkStdGen 0xcafebabe) merge (eval base_env log_channel compname) graph
+
     withAsync (log_thread log_channel) $ \logger -> do
-        res <- recPart merge (eval base_env log_channel compname) graph
+        res <- runReaderT compute thread_budget
         writeChan log_channel LogEnd
         wait logger
         return res
@@ -119,8 +126,8 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
 
         fusion_log_file = workdir ++ "/fusion-log"
 
-        eval :: [(String, String)] -> Chan LogMsg -> String -> Unique -> FuseNoFuses Reg -> IO Quality
-        eval base_env log_channel cname unique fnf = do
+        eval :: [(String, String)] -> Chan LogMsg -> String -> Unique -> FuseNoFuses Reg -> Budgeted IO Quality
+        eval base_env log_channel cname unique fnf = lift $ do
 
             let instr_file = workdir ++ "/fnf" ++ show unique
             let out_file = workdir ++ "/force_out" ++ show unique
@@ -152,7 +159,7 @@ runOn hlo_opt hlo_opt_args workdir hlo_path = do
 
 
 
-        merge :: Unique -> Reg -> Reg -> IO (Reg, Unique)
+        merge :: Unique -> Reg -> Reg -> Budgeted IO (Reg, Unique)
         merge u _ _ = return (RenameReg $ "tmp" ++ show u, u')
             where
                 u' = next u
@@ -256,6 +263,34 @@ instance MonadPar IO where
 
     parList = mapConcurrently id
 
+
+type Budget = Double
+
+type Budgeted m = ReaderT Budget m
+
+
+instance MonadPar m => MonadPar (Budgeted m) where
+    par2 (act1, act2) = do
+        budget <- ask
+        if budget > 1
+            then
+                let new_bud = budget / 2
+                in lift $ par2 (runReaderT act1 new_bud, runReaderT act2 new_bud)
+            else (,) <$> act1 <*> act2
+
+    parList lst = do
+        budget <- ask
+        if budget > 1
+            then
+                let new_bud = budget / count
+                in lift $ parList $ flip runReaderT new_bud <$> lst
+            else sequence lst
+        where
+            count = fromIntegral $ length lst
+
+
+
+
 --newtype MonadParT m a = MonadParT (m a)
 --    deriving (Functor, Applicative, Monad)
 --
@@ -274,24 +309,25 @@ type Fusion v = (v, v, v)
 type NoFusion v = (v, v)
 type FuseNoFuses v = ([Fusion v], S.Set (NoFusion v))
 
-recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m) => (Unique -> v -> v -> m (v, Unique)) -> (Unique -> FuseNoFuses v -> m q) -> G.Graph v -> m (FuseNoFuses v)
-recPart merge eval = fmap snd . go ([], S.empty) newUnique
+recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m) => StdGen -> (Unique -> v -> v -> m (v, Unique)) -> (Unique -> FuseNoFuses v -> m q) -> G.Graph v -> m (FuseNoFuses v)
+recPart gen merge eval = fmap snd . go gen ([], S.empty) newUnique
     where
-        go :: FuseNoFuses v -> Unique -> G.Graph v -> m (q, FuseNoFuses v)
-        go !f !u !g = case pick_edge g of
+        go :: StdGen -> FuseNoFuses v -> Unique -> G.Graph v -> m (q, FuseNoFuses v)
+        go !rng !f !u !g = case edge_policy_random rng g of
             Nothing -> (,f) <$> eval u f
-            Just (from, to) -> do
+            Just (from, to, rng') -> do
                 (merged, u') <- merge u from to
 
                 let with_merged = first ((from, to, merged):) f
                 let with_split = second (S.insert (from, to)) f
 
                 let (u'', um, us) = split3 u'
-                let merged_act = go with_merged um $ G.mergeEdge from to merged g
+                let (rng1, rng2) = R.split rng'
+                let merged_act = go rng1 with_merged um $ G.mergeEdge from to merged g
                 ((merged_quality, merged_sets), (split_quality , split_sets)) <- case G.getSubgraphs $ G.removeEdge from to g of
-                    [x] -> par2 (merged_act, go with_split us x)
+                    [x] -> par2 (merged_act, go rng2 with_split us x)
                     xs -> do
-                        let split_acts = zipWith (go with_split) (split (length xs) us) xs
+                        let split_acts = zipWith (go rng2 with_split) (split (length xs) us) xs
                         (mres, rec_results) <- par2 (merged_act, parList split_acts)
                         let sets = bimap concat S.unions $ unzip $ snd <$> rec_results
                         quality <- eval u'' sets
@@ -311,8 +347,8 @@ recPart merge eval = fmap snd . go ([], S.empty) newUnique
         -- rather quick to compute, and the idea is, to instead of finding
         -- the perfect place to "chop", we just "roughly aim for the center",
         -- and will probably get two parts rather quickly.
-        pick_edge :: G.Graph v -> Maybe (v, v)
-        pick_edge g = case G.getEdges g of
+        edge_policy_mass :: G.Graph v -> Maybe (v, v)
+        edge_policy_mass g = case G.getEdges g of
             []    -> Nothing
             edges -> Just $ minimumWith evalEdge edges
             where
@@ -322,4 +358,14 @@ recPart merge eval = fmap snd . go ([], S.empty) newUnique
 
                 minimumWith :: (Ord b, Foldable t) => (a -> b) -> t a -> a
                 minimumWith fn = minimumBy $ \l r -> compare (fn l) (fn r)
+
+        edge_policy_random :: RandomGen g => g -> G.Graph v -> Maybe (v, v, g)
+        edge_policy_random rng g = case G.getEdges g of
+            []    -> Nothing
+            edges ->
+                let
+                    edge_count = length edges
+                    (idx, rng') = uniformR (0, edge_count-1) rng
+                    (x, y) = edges !! idx
+                in Just (x, y, rng')
 

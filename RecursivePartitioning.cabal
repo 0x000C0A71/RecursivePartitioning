@@ -132,6 +132,7 @@ executable RecursivePartitioning
         process,
         directory,
         async,
+        random,
 
     ghc-options: -threaded
 
