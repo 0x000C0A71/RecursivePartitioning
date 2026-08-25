@@ -11,7 +11,7 @@ module Unique
 import Numeric (showHex)
 
 
-data Unique = Unique Int Int
+data Unique = Unique Integer Integer
 
 newUnique :: Unique
 newUnique = Unique 0 1
@@ -34,7 +34,7 @@ split :: Int -> Unique -> [Unique]
 split n = take n . fmap mul_stride . inf
     where
         mul_stride :: Unique -> Unique
-        mul_stride (Unique v s) = Unique v $ n * s
+        mul_stride (Unique v s) = Unique v $ fromIntegral n * s
 
         inf :: Unique -> [Unique]
         inf u = k : inf k
