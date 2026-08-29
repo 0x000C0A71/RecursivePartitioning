@@ -33,6 +33,10 @@ import Control.Monad.Reader
 import System.Random (RandomGen, uniformR, StdGen, mkStdGen)
 import qualified System.Random as R
 import GHC.Conc (numCapabilities)
+import Control.Monad.Writer
+import Data.Monoid
+import Control.Parallel.Strategies (using, parTuple2, evalTuple2, rseq, rdeepseq)
+import qualified Control.Parallel.Strategies as PS
 
 --liftA2 :: Applicative a => (b -> c -> d) -> a b -> a c -> a d
 --liftA2 fn l r = fn <$> l <*> r
@@ -90,7 +94,7 @@ main = do
 
     let max_budget = fromIntegral $ numCapabilities * 4
 
-    fnf <- runOn max_budget hlo_opt hlo_opt_args workdir hlo_path
+    fnf <- runOn False max_budget hlo_opt hlo_opt_args workdir hlo_path
     print fnf
 
 
@@ -101,32 +105,36 @@ data LogMsg
     deriving (Show)
 
 
-runOn :: Budget -> FilePath -> [String] -> FilePath -> FilePath -> IO (FuseNoFuses Reg)
-runOn thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
+runOn :: Bool -> Budget -> FilePath -> [String] -> FilePath -> FilePath -> IO (Either (Int) (FuseNoFuses Reg))
+runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
     createDirectoryIfMissing True opt_logs
 
-    log_channel <- newChan
-
     base_env <- getEnvironment
-
-    writeFile fusion_log_file ""
 
     call_opt "forward-pass" $ ("XLA_RPOF_FORWARD_FILE", graph_dump_file) : base_env
 
     [(compname, graph)] <- M.toList . readGraphs <$> readFile graph_dump_file
 
-    let compute = recPart (mkStdGen 0xC0A71) merge (eval base_env log_channel compname) graph
+    if calc_eval_count
+        then let
+            compute = recPart rng_gen merge eval_eval_c graph
+            Sum res = execWriter $ runReaderT compute thread_budget
+            in return $ Left res
+        else do
+            log_channel <- newChan
 
-    withAsync (log_thread log_channel) $ \logger -> do
-        res <- runReaderT compute thread_budget
-        writeChan log_channel LogEnd
-        wait logger
-        return res
+            let compute = recPart rng_gen merge (eval base_env log_channel compname) graph
+
+            withAsync (log_thread log_channel) $ \logger -> do
+                res <- runReaderT compute thread_budget
+                writeChan log_channel LogEnd
+                wait logger
+                return $ Right res
     where
+        rng_gen = mkStdGen 0xC0A71
+
         graph_dump_file :: FilePath
         graph_dump_file = workdir ++ "/graph"
-
-        fusion_log_file = workdir ++ "/fusion-log"
 
         eval :: [(String, String)] -> Chan LogMsg -> String -> Unique -> FuseNoFuses Reg -> Budgeted IO Quality
         eval base_env log_channel cname unique fnf = lift $ do
@@ -161,10 +169,13 @@ runOn thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
 
 
 
-        merge :: Unique -> Reg -> Reg -> Budgeted IO (Reg, Unique)
+        merge :: Monad m => Unique -> Reg -> Reg -> m (Reg, Unique)
         merge u _ _ = return (RenameReg $ "tmp" ++ show u, u')
             where
                 u' = next u
+
+        eval_eval_c :: Unique -> FuseNoFuses v -> Budgeted CounterM Int
+        eval_eval_c _ _ = lift inc >> return 0
 
         opt_logs :: FilePath
         opt_logs = workdir ++ "/opt-logs"
@@ -242,6 +253,28 @@ readGraphs = (\(_,_,v) -> v) . flip (foldl (flip (.)) id . fmap one_line . lines
 
 
 
+type CounterM = Writer (Sum Int)
+
+instance MonadPar CounterM where
+    par2 (act1, act2) = writer ((a, b), w1 <> w2)
+        where
+            ((a, w1), (b, w2)) = (runWriter act1, runWriter act2) `using` parTuple2 seq_tup seq_tup
+            seq_tup = evalTuple2 rseq rdeepseq
+
+    parList acts = writer (els, mconcat counts)
+        where
+            parred = fmap runWriter acts `using` PS.parList seq_tup
+            (els, counts) = unzip parred
+            seq_tup = evalTuple2 rseq rdeepseq
+
+add :: Int -> CounterM ()
+add n = writer ((), Sum n)
+
+
+inc :: CounterM ()
+inc = add 1
+
+
 
 
 class Monad m => MonadPar m where
@@ -280,6 +313,7 @@ instance MonadPar m => MonadPar (Budgeted m) where
                 in lift $ par2 (runReaderT act1 new_bud, runReaderT act2 new_bud)
             else (,) <$> act1 <*> act2
 
+    parList [] = return []
     parList lst = do
         budget <- ask
         if budget > 1

@@ -52,7 +52,7 @@ split4 :: Unique -> (Unique, Unique, Unique, Unique)
 split4 = (\[u1, u2, u3, u4] -> (u1, u2, u3, u4)) . split 4
 
 split5 :: Unique -> (Unique, Unique, Unique, Unique, Unique)
-split5 = (\[u1, u2, u3, u4, u5] -> (u1, u2, u3, u4, u5)) . split 3
+split5 = (\[u1, u2, u3, u4, u5] -> (u1, u2, u3, u4, u5)) . split 5
 
 
 
