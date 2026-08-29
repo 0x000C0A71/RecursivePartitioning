@@ -345,7 +345,27 @@ type Fusion v = (v, v, v)
 type NoFusion v = (v, v)
 type FuseNoFuses v = ([Fusion v], S.Set (NoFusion v))
 
-recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m) => StdGen -> (Unique -> v -> v -> m (v, Unique)) -> (Unique -> FuseNoFuses v -> m q) -> G.Graph v -> m (FuseNoFuses v)
+-- | Perform recursive partitioning on a graph
+--
+-- Searches for the optimal set of edges to fuse such that a
+-- quality metric returned by the passed eval function is maximized
+recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m)
+    => StdGen -- ^ Random number generator.
+    -> (Unique -> v -> v -> m (v, Unique))
+    -- ^ Merge function.
+    -- When merging an edge of the graph, this function
+    -- is used to generate the newly created "merged"
+    -- vertex. A `Unique` ID source is provided which
+    -- must be returned, both if stepped using `next`
+    -- or if left unchanged.
+    -> (Unique -> FuseNoFuses v -> m q)
+    -- ^ Eval function
+    -- When evaluating a leaf, this function is used to get
+    -- a "quality" metric. It is provided with a `Unique` ID
+    -- source, but it is not allowed to step it (as indicated
+    -- by it not returning a `Unique`)
+    -> G.Graph v -- ^ Graph to run the search on
+    -> m (FuseNoFuses v)
 recPart gen merge eval = fmap snd . go gen ([], S.empty) newUnique newUnique
     where
         go :: StdGen -> FuseNoFuses v -> Unique -> Unique -> G.Graph v -> m (q, FuseNoFuses v)
