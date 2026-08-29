@@ -346,27 +346,29 @@ type NoFusion v = (v, v)
 type FuseNoFuses v = ([Fusion v], S.Set (NoFusion v))
 
 recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m) => StdGen -> (Unique -> v -> v -> m (v, Unique)) -> (Unique -> FuseNoFuses v -> m q) -> G.Graph v -> m (FuseNoFuses v)
-recPart gen merge eval = fmap snd . go gen ([], S.empty) newUnique
+recPart gen merge eval = fmap snd . go gen ([], S.empty) newUnique newUnique
     where
-        go :: StdGen -> FuseNoFuses v -> Unique -> G.Graph v -> m (q, FuseNoFuses v)
-        go !rng !f !u !g = case edge_policy_random rng g of
-            Nothing -> (,f) <$> eval u f
+        go :: StdGen -> FuseNoFuses v -> Unique -> Unique -> G.Graph v -> m (q, FuseNoFuses v)
+        go !rng !f !merge_u !eval_u !g = case edge_policy_random rng g of
+            Nothing -> (,f) <$> eval eval_u f
             Just (from, to, rng') -> do
-                (merged, u') <- merge u from to
+                (merged, merge_u') <- merge merge_u from to
 
                 let with_merged = first ((from, to, merged):) f
                 let with_split = second (S.insert (from, to)) f
 
-                let (u'', um, us) = split3 u'
+                let eval_u' = next eval_u
+                let (eval_u1, eval_u2) = split2 eval_u'
+
                 let (rng1, rng2) = R.split rng'
-                let merged_act = go rng1 with_merged um $ G.mergeEdge from to merged g
+                let merged_act = go rng1 with_merged merge_u' eval_u1 $ G.mergeEdge from to merged g
                 ((merged_quality, merged_sets), (split_quality , split_sets)) <- case G.getSubgraphs $ G.removeEdge from to g of
-                    [x] -> par2 (merged_act, go rng2 with_split us x)
+                    [x] -> par2 (merged_act, go rng2 with_split merge_u' eval_u2 x)
                     xs -> do
-                        let split_acts = zipWith (go rng2 with_split) (split (length xs) us) xs
+                        let split_acts = zipWith (go rng2 with_split merge_u') (split (length xs) eval_u2) xs
                         (mres, rec_results) <- par2 (merged_act, parList split_acts)
                         let sets = bimap concat S.unions $ unzip $ snd <$> rec_results
-                        quality <- eval u'' sets
+                        quality <- eval eval_u sets
                         return (mres, (quality, sets))
                 return $ if split_quality > merged_quality
                     then (split_quality, split_sets)
