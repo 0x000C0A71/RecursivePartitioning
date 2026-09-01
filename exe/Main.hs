@@ -328,7 +328,7 @@ recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m)
 recPart gen merge eval = fmap snd . go gen ([], S.empty) newUnique newUnique
     where
         go :: StdGen -> FuseNoFuses v -> Unique -> Unique -> G.Graph v -> m (q, FuseNoFuses v)
-        go !rng !f !merge_u !eval_u !g = case edge_policy_random rng g of
+        go !rng !f !merge_u !eval_u !g = case edge_policy rng g of
             Nothing -> (,f) <$> eval eval_u f
             Just (from, to, rng') -> do
                 (merged, merge_u') <- merge merge_u from to
@@ -344,7 +344,10 @@ recPart gen merge eval = fmap snd . go gen ([], S.empty) newUnique newUnique
                 ((merged_quality, merged_sets), (split_quality , split_sets)) <- case G.getSubgraphs $ G.removeEdge from to g of
                     [x] -> par2 (merged_act, go rng2 with_split merge_u' eval_u2 x)
                     xs -> do
-                        let split_acts = zipWith (go rng2 with_split merge_u') (split (length xs) eval_u2) xs
+                        let eval_us  = split (length xs) eval_u2
+                        let merge_us = split (length xs) merge_u'
+                        let both_uniques = zip merge_us eval_us
+                        let split_acts = zipWith (uncurry $ go rng2 with_split) both_uniques xs
                         (mres, rec_results) <- par2 (merged_act, parList split_acts)
                         let sets = bimap concat S.unions $ unzip $ snd <$> rec_results
                         quality <- eval eval_u sets
@@ -352,6 +355,8 @@ recPart gen merge eval = fmap snd . go gen ([], S.empty) newUnique newUnique
                 return $ if split_quality > merged_quality
                     then (split_quality, split_sets)
                     else (merged_quality, merged_sets)
+
+        edge_policy = edge_policy_mass
 
         -- | The whole algorithm "chops" one edge away each iteration,
         -- hoping to "chop" the graph in half. This function "aims" the
@@ -364,10 +369,12 @@ recPart gen merge eval = fmap snd . go gen ([], S.empty) newUnique newUnique
         -- rather quick to compute, and the idea is, to instead of finding
         -- the perfect place to "chop", we just "roughly aim for the center",
         -- and will probably get two parts rather quickly.
-        edge_policy_mass :: G.Graph v -> Maybe (v, v)
-        edge_policy_mass g = case G.getEdges g of
+        edge_policy_mass :: RandomGen g => g -> G.Graph v -> Maybe (v, v, g)
+        edge_policy_mass rng g = case G.getEdges g of
             []    -> Nothing
-            edges -> Just $ minimumWith evalEdge edges
+            edges ->
+                let (x, y) = minimumWith evalEdge edges
+                in Just (x, y, rng)
             where
                 (intos, outs) = G.getMassMaps g
 
