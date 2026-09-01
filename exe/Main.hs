@@ -8,69 +8,41 @@
 module Main where
 
 import qualified Graph as G
+import Unique
+
+import Control.Concurrent          (Chan(), writeChan, readChan, newChan)
+import Control.Concurrent.Async    (wait, withAsync, mapConcurrently)
+import Control.Monad.Reader        (ReaderT(), ask, runReaderT)
+import Control.Monad.Trans         (lift)
+import Control.Monad.Writer        (Writer(), writer, runWriter, execWriter)
+import Control.Parallel.Strategies (using, parTuple2, evalTuple2, rseq, rdeepseq)
+import Data.Bifunctor              (first, second, bimap)
+import Data.Foldable               (minimumBy)
+import Data.Monoid                 (Sum(Sum))
+import GHC.Conc                    (numCapabilities)
+import System.Directory            (doesFileExist, removeFile, createDirectoryIfMissing, getCurrentDirectory, makeAbsolute)
+import System.Environment          (lookupEnv, getArgs, getEnvironment)
+import System.Exit                 (ExitCode(..))
+import System.IO                   (Handle, withFile, IOMode(WriteMode))
+import System.Process              (CreateProcess(..), StdStream(UseHandle), createProcess_, waitForProcess, proc)
+import System.Random               (RandomGen, uniformR, StdGen, mkStdGen)
+
 import qualified Data.Set as S
 import qualified Data.Map as M
 
-import Data.Bifunctor
-import Control.Parallel
-import Control.Concurrent.MVar
-import Control.Concurrent
-import Control.Monad.State
-
-import System.Process
-import Data.IORef
-import System.Environment (setEnv, unsetEnv, lookupEnv, getArgs, getEnvironment)
-import System.Directory
-import Data.Foldable (minimumBy)
-
-import Control.Concurrent.Async
-
-import Unique
-import Control.Monad
-import System.IO (Handle, withFile, IOMode (WriteMode))
-import System.Exit (ExitCode(..))
-import Control.Monad.Reader
-import System.Random (RandomGen, uniformR, StdGen, mkStdGen)
-import qualified System.Random as R
-import GHC.Conc (numCapabilities)
-import Control.Monad.Writer
-import Data.Monoid
-import Control.Parallel.Strategies (using, parTuple2, evalTuple2, rseq, rdeepseq)
-import qualified Control.Parallel.Strategies as PS
-
---liftA2 :: Applicative a => (b -> c -> d) -> a b -> a c -> a d
---liftA2 fn l r = fn <$> l <*> r
+import qualified Control.Parallel.Strategies as PS (parList)
+import qualified System.Random as R (split)
 
 data Reg
     = OrigReg String
     | RenameReg String
     deriving (Show, Eq, Ord)
 
-type Counter = IORef Int
-
 type Quality = Float
-
-counterInc :: Counter -> IO Int
-counterInc counter = do
-    old <- readIORef counter
-    writeIORef counter $ old + 1
-    return old
-
-newCounter :: IO Counter
-newCounter = newIORef 0
-
--- recPart :: forall v m q . (Ord v, Ord q, Monad m) => (v -> v -> m v) -> (FuseNoFuses v -> m q) -> G.Graph v -> m (FuseNoFuses v)
-
-withEnv :: String -> String -> IO a -> IO a
-withEnv en ev act = do
-    setEnv en ev
-    v <- act
-    unsetEnv en
-    return v
 
 
 splitOn :: Eq a => a -> [a] -> ([a], [a])
-splitOn k [] = ([], [])
+splitOn _ [] = ([], [])
 splitOn k (x:xs) = if x == k
     then ([], xs)
     else (x:ls, rs)
@@ -88,7 +60,7 @@ main = do
 
     hlo_path <- case my_args of
         [path] -> makeAbsolute path
-        _ -> return $ error "Expected path to hlo module as cmd line arg"
+        _ -> return $ error "Expected path to hlo module as singular cmd line arg"
 
     workdir <- getCurrentDirectory >>= makeAbsolute
 
@@ -131,6 +103,7 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
                 wait logger
                 return $ Right res
     where
+        rng_gen :: StdGen
         rng_gen = mkStdGen 0xC0A71
 
         graph_dump_file :: FilePath
@@ -181,8 +154,9 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
         opt_logs = workdir ++ "/opt-logs"
 
         call_opt :: String -> [(String, String)] -> IO ()
-        call_opt suffix env = --callProcess hlo_opt $ hlo_opt_args ++ [hlo_path]
-            withFile opt_out WriteMode $ \opt_out_hdl -> withFile opt_err WriteMode $ \opt_err_hdl -> do
+        call_opt suffix opt_env =
+            withFile opt_out WriteMode $ \opt_out_hdl ->
+            withFile opt_err WriteMode $ \opt_err_hdl -> do
                 let cp = create_process opt_out_hdl opt_err_hdl
                 (_, _, _, process_handle) <- createProcess_ "call_opt" cp
                 waitForProcess process_handle >>= \case
@@ -195,7 +169,7 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
                 create_process opt_out_hdl opt_err_hdl = (proc hlo_opt $ hlo_opt_args ++ [hlo_path])
                     { std_out = UseHandle opt_out_hdl
                     , std_err = UseHandle opt_err_hdl
-                    , env     = Just env
+                    , env     = Just opt_env
                     }
 
                 opt_out = opt_logs ++ "/opt-stdout-" ++ suffix
@@ -234,7 +208,6 @@ encode cname (xs, _) = unlines $ do_one <$> xs
                     RenameReg s -> (s, 1)
 
 
-type InstrName = String
 
 
 type ParserState = (String, Reg, M.Map String (G.Graph Reg))
@@ -250,6 +223,7 @@ readGraphs = (\(_,_,v) -> v) . flip (foldl (flip (.)) id . fmap one_line . lines
         one_line ('$':rest) (comp, to, graphs) = (comp, to, M.adjust (G.addEdge from to) comp graphs)
             where
                 from = OrigReg $ head $ words rest
+        one_line (c:_) _ = error $ "Malformed graph dump: Line starting with " ++ show c
 
 
 
@@ -291,9 +265,9 @@ class Monad m => MonadPar m where
     par5 (a, b, c, d, e) = flip fmap (par2 (par4 (a, b, c, d), e)) $ \((a', b', c', d'), e') -> (a', b', c', d', e')
 
 instance MonadPar IO where
-    par2 (act1, act2) = withAsync act1 $ \thread1 -> withAsync act2 $ \thread2 -> do
-        res1 <- wait thread1
-        res2 <- wait thread2
+    par2 (act1, act2) = withAsync act2 $ \thread -> do
+        res1 <- act1
+        res2 <- wait thread
         return (res1, res2)
 
     parList = mapConcurrently id
@@ -307,38 +281,23 @@ type Budgeted m = ReaderT Budget m
 instance MonadPar m => MonadPar (Budgeted m) where
     par2 (act1, act2) = do
         budget <- ask
+        let new_bud = budget / 2
         if budget > 1
-            then
-                let new_bud = budget / 2
-                in lift $ par2 (runReaderT act1 new_bud, runReaderT act2 new_bud)
+            then lift $ par2 (runReaderT act1 new_bud, runReaderT act2 new_bud)
             else (,) <$> act1 <*> act2
 
     parList [] = return []
     parList lst = do
         budget <- ask
+        let new_bud = budget / count
         if budget > 1
-            then
-                let new_bud = budget / count
-                in lift $ parList $ flip runReaderT new_bud <$> lst
+            then lift $ parList $ flip runReaderT new_bud <$> lst
             else sequence lst
         where
             count = fromIntegral $ length lst
 
 
 
-
---newtype MonadParT m a = MonadParT (m a)
---    deriving (Functor, Applicative, Monad)
---
---instance Monad m => MonadPar (MonadParT m) where
---    par2 = uncurry $ liftA2 (,)
-
-data HloModule
-
-findOptimal :: HloModule -> IO (S.Set (v, v), S.Set (v, v))
-findOptimal = undefined
-    where
-        --eval
 
 
 type Fusion v = (v, v, v)
