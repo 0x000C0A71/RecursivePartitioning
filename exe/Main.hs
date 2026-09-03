@@ -89,16 +89,16 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
 
     if calc_eval_count
         then let
-            compute = recPart rng_gen merge eval_eval_c graph
-            Sum res = execWriter $ runReaderT compute thread_budget
+            compute = recPart thread_budget rng_gen merge eval_eval_c graph
+            Sum res = execWriter compute
             in return $ Left res
         else do
             log_channel <- newChan
 
-            let compute = recPart rng_gen merge (eval base_env log_channel compname) graph
+            let compute = recPart thread_budget rng_gen merge (eval base_env log_channel compname) graph
 
             withAsync (log_thread log_channel) $ \logger -> do
-                res <- runReaderT compute thread_budget
+                res <- compute
                 writeChan log_channel LogEnd
                 wait logger
                 return $ Right res
@@ -109,8 +109,8 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
         graph_dump_file :: FilePath
         graph_dump_file = workdir ++ "/graph"
 
-        eval :: [(String, String)] -> Chan LogMsg -> String -> Unique -> FuseNoFuses Reg -> Budgeted IO Quality
-        eval base_env log_channel cname unique fnf = lift $ do
+        eval :: [(String, String)] -> Chan LogMsg -> String -> Unique -> FuseNoFuses Reg -> IO Quality
+        eval base_env log_channel cname unique fnf = do
 
             let instr_file = workdir ++ "/fnf" ++ show unique
             let out_file = workdir ++ "/force_out" ++ show unique
@@ -147,8 +147,8 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
             where
                 u' = next u
 
-        eval_eval_c :: Unique -> FuseNoFuses v -> Budgeted CounterM Int
-        eval_eval_c _ _ = lift inc >> return 0
+        eval_eval_c :: Unique -> FuseNoFuses v -> CounterM Int
+        eval_eval_c _ _ = inc >> return 0
 
         opt_logs :: FilePath
         opt_logs = workdir ++ "/opt-logs"
@@ -275,26 +275,6 @@ instance MonadPar IO where
 
 type Budget = Double
 
-type Budgeted m = ReaderT Budget m
-
-
-instance MonadPar m => MonadPar (Budgeted m) where
-    par2 (act1, act2) = do
-        budget <- ask
-        let new_bud = budget / 2
-        if budget > 1
-            then lift $ par2 (runReaderT act1 new_bud, runReaderT act2 new_bud)
-            else (,) <$> act1 <*> act2
-
-    parList [] = return []
-    parList lst = do
-        budget <- ask
-        let new_bud = budget / count
-        if budget > 1
-            then lift $ parList $ flip runReaderT new_bud <$> lst
-            else sequence lst
-        where
-            count = fromIntegral $ length lst
 
 
 
@@ -309,7 +289,8 @@ type FuseNoFuses v = ([Fusion v], S.Set (NoFusion v))
 -- Searches for the optimal set of edges to fuse such that a
 -- quality metric returned by the passed eval function is maximized
 recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m)
-    => StdGen -- ^ Random number generator.
+    => Budget -- ^ Parallel bifurcation budget
+    -> StdGen -- ^ Random number generator.
     -> (Unique -> v -> v -> m (v, Unique))
     -- ^ Merge function.
     -- When merging an edge of the graph, this function
@@ -325,10 +306,10 @@ recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m)
     -- by it not returning a `Unique`)
     -> G.Graph v -- ^ Graph to run the search on
     -> m (FuseNoFuses v)
-recPart gen merge eval = fmap snd . go gen ([], S.empty) newUnique newUnique
+recPart bud gen merge eval = fmap snd . go bud gen ([], S.empty) newUnique newUnique
     where
-        go :: StdGen -> FuseNoFuses v -> Unique -> Unique -> G.Graph v -> m (q, FuseNoFuses v)
-        go !rng !f !merge_u !eval_u !g = case edge_policy rng g of
+        go :: Budget -> StdGen -> FuseNoFuses v -> Unique -> Unique -> G.Graph v -> m (q, FuseNoFuses v)
+        go !budget !rng !f !merge_u !eval_u !g = case edge_policy rng g of
             Nothing -> (,f) <$> eval eval_u f
             Just (from, to, rng') -> do
                 (merged, merge_u') <- merge merge_u from to
@@ -340,20 +321,32 @@ recPart gen merge eval = fmap snd . go gen ([], S.empty) newUnique newUnique
                 let (eval_u1, eval_u2) = split2 eval_u'
 
                 let (rng1, rng2) = R.split rng'
-                let merged_act = go rng1 with_merged merge_u' eval_u1 $ G.mergeEdge from to merged g
+                let merged_act = go (budget/2) rng1 with_merged merge_u' eval_u1 $ G.mergeEdge from to merged g
                 ((merged_quality, merged_sets), (split_quality , split_sets)) <- case G.getSubgraphs $ G.removeEdge from to g of
                     []  -> do
                         mres <- merged_act
                         quality <- eval eval_u f
                         return (mres, (quality, f))
-                    [x] -> par2 (merged_act, go rng2 with_split merge_u' eval_u2 x)
+                    [x] ->
+                        let unmerged_act = go (budget/2) rng2 with_split merge_u' eval_u2 x
+                        in if budget > 1
+                            then par2 (merged_act, unmerged_act)
+                            else (,) <$> merged_act <*> unmerged_act
                     [x1, x2] -> do
                         let (eval_us1,  eval_us2 ) = split2 eval_u2
                         let (merge_us1, merge_us2) = split2 merge_u'
-                        let go' = go rng2 with_split
+                        let go' = go (budget/4) rng2 with_split
                         let act1 = go' merge_us1 eval_us1 x1
                         let act2 = go' merge_us2 eval_us2 x2
-                        (mres, (_, (fuse1, nfuse1)), (_, (fuse2, nfuse2))) <- par3 (merged_act, act1, act2)
+                        (mres, (_, (fuse1, nfuse1)), (_, (fuse2, nfuse2))) <- case (budget > 1, budget > 2) of
+                            (True , True ) -> par3 (merged_act, act1, act2)
+                            (True , False) -> (\(a, (b, c)) -> (a, b, c)) <$> par2 (merged_act, (,) <$> act1 <*> act2)
+                            (False, False) -> do
+                                m  <- merged_act
+                                s1 <- act1
+                                s2 <- act2
+                                return (m, s1, s2)
+                            (False, True ) -> error "Not possible by transitivity of (>)"
                         let sets = (fuse1 ++ fuse2, nfuse1 `S.union` nfuse2)
                         quality <- eval eval_u sets
                         return (mres, (quality, sets))
