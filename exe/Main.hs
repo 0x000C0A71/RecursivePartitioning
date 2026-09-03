@@ -364,7 +364,7 @@ recPart bud gen merge eval = fmap snd . go bud gen ([], S.empty) newUnique newUn
                 ((merged_quality, merged_sets), (split_quality , split_sets)) <- case G.getSubgraphs $ G.removeEdge from to g of
                     []  -> do
                         mres <- merged_act
-                        quality <- eval eval_u f
+                        quality <- eval eval_u with_split
                         return (mres, (quality, f))
                     [x] ->
                         let unmerged_act = go (budget/2) rng2 with_split merge_u' eval_u2 x

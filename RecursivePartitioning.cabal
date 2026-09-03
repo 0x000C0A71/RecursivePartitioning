@@ -134,7 +134,7 @@ executable RecursivePartitioning
         async,
         random,
 
-    ghc-options: -threaded
+    ghc-options: -threaded -rtsopts
 
     -- Directories containing source files.
     hs-source-dirs:   exe
