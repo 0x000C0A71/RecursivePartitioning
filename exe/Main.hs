@@ -51,6 +51,19 @@ splitOn k (x:xs) = if x == k
         (ls, rs) = splitOn k xs
 
 
+dropout :: Ord v => Double -> G.Graph v -> G.Graph v
+dropout ratio g = case G.getSubgraphs dropped of
+    [x] -> x
+    []  -> error "Dropout failed: No graph left"
+    _   -> error "Dropout failed: We split the graph"
+    where
+        edges = G.getEdgesTopological g
+        edge_count = length edges
+        to_remove = round $ fromIntegral edge_count * ratio
+        elems = take to_remove edges
+        dropped = foldl (flip ($)) g $ uncurry G.removeEdge <$> elems
+
+
 main :: IO ()
 main = do
     hlo_opt <- flip fmap (lookupEnv "HLO_OPT_PATH") $ \case
@@ -88,15 +101,22 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
 
     [(compname, graph)] <- M.toList . readGraphs <$> readFile graph_dump_file
 
+    let num_edges = length $ G.getEdges graph
+    putStrLn $ "Read computation '" ++ compname ++ "' with " ++ show num_edges ++ " edges"
+
+    let graph' = dropout 0.0 graph
+    let num_edges' = length $ G.getEdges graph
+    putStrLn $ "Dropped out to " ++ show num_edges' ++ " edges"
+
     if calc_eval_count
         then let
-            compute = recPart thread_budget rng_gen merge eval_eval_c graph
+            compute = recPart thread_budget rng_gen merge eval_eval_c graph'
             Sum res = execWriter compute
             in return $ Left res
         else do
             log_channel <- newChan
 
-            let compute = recPart thread_budget rng_gen merge (eval base_env log_channel compname) graph
+            let compute = recPart thread_budget rng_gen merge (eval base_env log_channel compname) graph'
 
             withAsync (log_thread log_channel) $ \logger -> do
                 res <- compute
