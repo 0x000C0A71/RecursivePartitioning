@@ -1,6 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
 
 module Graph
     ( Graph()
@@ -13,6 +14,8 @@ module Graph
     , getPredecessors
     , getVertices
     , getMassMaps
+    , getVerticesTopological
+    , getEdgesTopological
 
     , dbgShow
     , dbgVerify
@@ -177,6 +180,28 @@ getMassMaps (Graph m) = bimap eval eval monads
 
         eval :: State (M.Map v Int) a -> M.Map v Int
         eval = flip execState M.empty
+
+getVerticesTopological :: forall v . Ord v => Graph v -> [v]
+getVerticesTopological (Graph g) = reverse rev_list
+    where
+        go :: v -> State (S.Set v) [v]
+        go k = gets (S.member k) >>= \case
+            True -> return []
+            False -> do
+                modify $ S.insert k
+                let preds = S.toList $ snd $ g M.! k
+                l <- mconcat <$> mapM go preds
+                return $ k : l
+
+        all_verts = S.toList $ M.keysSet g
+
+        rev_list = mconcat $ evalState (mapM go all_verts) S.empty
+
+getEdgesTopological :: forall v . Ord v => Graph v -> [(v, v)]
+getEdgesTopological g = getVerticesTopological g >>= get_incoming
+    where
+        get_incoming :: v -> [(v, v)]
+        get_incoming k = (,k) <$> getPredecessors g k
 
 
 
