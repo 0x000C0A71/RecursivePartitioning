@@ -4,6 +4,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Main where
 
@@ -306,6 +307,10 @@ recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m)
     -- by it not returning a `Unique`)
     -> G.Graph v -- ^ Graph to run the search on
     -> m (FuseNoFuses v)
+--{-# SPECIALIZE recPart @Reg @IO @Quality #-}
+--{-# SPECIALIZE recPart @Reg @CounterM @Int #-}
+{-# SPECIALIZE recPart ::  Budget -> StdGen -> (Unique -> Reg -> Reg -> IO (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> IO Quality) -> G.Graph Reg -> IO (FuseNoFuses Reg) #-}
+{-# SPECIALIZE recPart ::  Budget -> StdGen -> (Unique -> Reg -> Reg -> CounterM (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> CounterM Int) -> G.Graph Reg -> CounterM (FuseNoFuses Reg) #-}
 recPart bud gen merge eval = fmap snd . go bud gen ([], S.empty) newUnique newUnique
     where
         go :: Budget -> StdGen -> FuseNoFuses v -> Unique -> Unique -> G.Graph v -> m (q, FuseNoFuses v)
