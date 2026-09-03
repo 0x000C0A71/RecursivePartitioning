@@ -105,7 +105,7 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
     putStrLn $ "Read computation '" ++ compname ++ "' with " ++ show num_edges ++ " edges"
 
     let graph' = dropout 0.0 graph
-    let num_edges' = length $ G.getEdges graph
+    let num_edges' = length $ G.getEdges graph'
     putStrLn $ "Dropped out to " ++ show num_edges' ++ " edges"
 
     if calc_eval_count

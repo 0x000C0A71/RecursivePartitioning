@@ -182,7 +182,7 @@ getMassMaps (Graph m) = bimap eval eval monads
         eval = flip execState M.empty
 
 getVerticesTopological :: forall v . Ord v => Graph v -> [v]
-getVerticesTopological (Graph g) = reverse rev_list
+getVerticesTopological (Graph g) = rev_list
     where
         go :: v -> State (S.Set v) [v]
         go k = gets (S.member k) >>= \case
@@ -191,7 +191,7 @@ getVerticesTopological (Graph g) = reverse rev_list
                 modify $ S.insert k
                 let preds = S.toList $ snd $ g M.! k
                 l <- mconcat <$> mapM go preds
-                return $ k : l
+                return $ l ++ [k]
 
         all_verts = S.toList $ M.keysSet g
 
