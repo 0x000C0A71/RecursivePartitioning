@@ -342,16 +342,22 @@ recPart gen merge eval = fmap snd . go gen ([], S.empty) newUnique newUnique
                 let (rng1, rng2) = R.split rng'
                 let merged_act = go rng1 with_merged merge_u' eval_u1 $ G.mergeEdge from to merged g
                 ((merged_quality, merged_sets), (split_quality , split_sets)) <- case G.getSubgraphs $ G.removeEdge from to g of
+                    []  -> do
+                        mres <- merged_act
+                        quality <- eval eval_u f
+                        return (mres, (quality, f))
                     [x] -> par2 (merged_act, go rng2 with_split merge_u' eval_u2 x)
-                    xs -> do
-                        let eval_us  = split (length xs) eval_u2
-                        let merge_us = split (length xs) merge_u'
-                        let both_uniques = zip merge_us eval_us
-                        let split_acts = zipWith (uncurry $ go rng2 with_split) both_uniques xs
-                        (mres, rec_results) <- par2 (merged_act, parList split_acts)
-                        let sets = bimap concat S.unions $ unzip $ snd <$> rec_results
+                    [x1, x2] -> do
+                        let (eval_us1,  eval_us2 ) = split2 eval_u2
+                        let (merge_us1, merge_us2) = split2 merge_u'
+                        let go' = go rng2 with_split
+                        let act1 = go' merge_us1 eval_us1 x1
+                        let act2 = go' merge_us2 eval_us2 x2
+                        (mres, (_, (fuse1, nfuse1)), (_, (fuse2, nfuse2))) <- par3 (merged_act, act1, act2)
+                        let sets = (fuse1 ++ fuse2, nfuse1 `S.union` nfuse2)
                         quality <- eval eval_u sets
                         return (mres, (quality, sets))
+                    _ -> error "Got more than 2 subgraphs after one deletion"
                 return $ if split_quality > merged_quality
                     then (split_quality, split_sets)
                     else (merged_quality, merged_sets)
