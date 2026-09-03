@@ -231,6 +231,8 @@ readGraphs = (\(_,_,v) -> v) . flip (foldl (flip (.)) id . fmap one_line . lines
 type CounterM = Writer (Sum Int)
 
 instance MonadPar CounterM where
+    {-# INLINE par2 #-}
+    {-# INLINE parList #-}
     par2 (act1, act2) = writer ((a, b), w1 <> w2)
         where
             ((a, w1), (b, w2)) = (runWriter act1, runWriter act2) `using` parTuple2 seq_tup seq_tup
@@ -256,20 +258,32 @@ class Monad m => MonadPar m where
     par2 :: (m a, m b) -> m (a, b)
     parList :: [m a] -> m [a]
 
+    {-# INLINE par3 #-}
     par3 :: (m a, m b, m c) -> m (a, b, c)
     par3 (a, b, c) = flip fmap (par2 (par2 (a, b), c)) $ \((a', b'), c') -> (a', b', c')
 
+    {-# INLINE par4 #-}
     par4 :: (m a, m b, m c, m d) -> m (a, b, c, d)
     par4 (a, b, c, d) = flip fmap (par2 (par2 (a, b), par2 (c, d))) $ \((a', b'), (c', d')) -> (a', b', c', d')
 
+    {-# INLINE par5 #-}
     par5 :: (m a, m b, m c, m d, m e) -> m (a, b, c, d, e)
     par5 (a, b, c, d, e) = flip fmap (par2 (par4 (a, b, c, d), e)) $ \((a', b', c', d'), e') -> (a', b', c', d', e')
 
 instance MonadPar IO where
+    {-# INLINE par2 #-}
+    {-# INLINE par3 #-}
+    {-# INLINE parList #-}
     par2 (act1, act2) = withAsync act2 $ \thread -> do
         res1 <- act1
         res2 <- wait thread
         return (res1, res2)
+
+    par3 (act1, act2, act3) = withAsync act2 $ \thread2 -> withAsync act3 $ \thread3 -> do
+        res1 <- act1
+        res2 <- wait thread2
+        res3 <- wait thread3
+        return (res1, res2, res3)
 
     parList = mapConcurrently id
 
