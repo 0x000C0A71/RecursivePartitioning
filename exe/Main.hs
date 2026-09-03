@@ -111,7 +111,7 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
     if calc_eval_count
         then let
             compute = recPart thread_budget rng_gen merge eval_eval_c graph'
-            Sum res = execWriter compute
+            (_, res) = runCounterM compute
             in return $ Left res
         else do
             log_channel <- newChan
@@ -248,24 +248,46 @@ readGraphs = (\(_,_,v) -> v) . flip (foldl (flip (.)) id . fmap one_line . lines
 
 
 
-type CounterM = Writer (Sum Int)
+data CounterM a = CounterM !a !Int
+
+runCounterM :: CounterM a -> (a, Int)
+runCounterM (CounterM a n) = (a, n)
+
+instance Functor CounterM where
+    {-# INLINE fmap #-}
+    fmap f (CounterM a n) = CounterM (f a) n
+
+instance Applicative CounterM where
+    {-# INLINE liftA2 #-}
+    {-# INLINE (<*>) #-}
+    {-# INLINE pure #-}
+
+    liftA2 f (CounterM a n1) (CounterM b n2) = CounterM (f a b) (n1 + n2)
+    (CounterM f n1) <*> (CounterM a n2) = CounterM (f a) (n1 + n2)
+    pure a = CounterM a 0
+
+instance Monad CounterM where
+    {-# INLINE (>>=) #-}
+    (CounterM a n1) >>= f = CounterM b (n1 + n2)
+        where
+            (CounterM b n2) = f a
 
 instance MonadPar CounterM where
     {-# INLINE par2 #-}
     {-# INLINE parList #-}
-    par2 (act1, act2) = writer ((a, b), w1 <> w2)
+    par2 (act1, act2) = CounterM (a, b) (w1 + w2)
         where
-            ((a, w1), (b, w2)) = (runWriter act1, runWriter act2) `using` parTuple2 seq_tup seq_tup
+            ((a, w1), (b, w2)) = (runCounterM act1, runCounterM act2) `using` parTuple2 seq_tup seq_tup
             seq_tup = evalTuple2 rseq rdeepseq
 
-    parList acts = writer (els, mconcat counts)
+    parList acts = CounterM els (sum counts)
         where
-            parred = fmap runWriter acts `using` PS.parList seq_tup
+            parred = fmap runCounterM acts `using` PS.parList seq_tup
             (els, counts) = unzip parred
             seq_tup = evalTuple2 rseq rdeepseq
 
 add :: Int -> CounterM ()
-add n = writer ((), Sum n)
+add = CounterM ()
 
 
 inc :: CounterM ()
