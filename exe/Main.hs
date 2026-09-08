@@ -468,7 +468,22 @@ recPart bud gen merge eval = fmap snd . go bud gen ([], S.empty) newUnique newUn
                         let sets = (fuse1 ++ fuse2, nfuse1 `S.union` nfuse2)
                         quality <- eval eval_u sets
                         return (mres, (quality, sets))
-                    _ -> error "Got more than 2 subgraphs after one deletion"
+                    {- START AI-GENERATED CODE -}
+                    xs -> do
+                        let n = length xs
+                            child_budget = budget / (2 * fromIntegral n)
+                            merge_us = split n merge_u'
+                            eval_us = split n eval_u2
+                            acts = [ go child_budget rng2 with_split mu eu x | (mu, eu, x) <- zip3 merge_us eval_us xs ]
+                        (mres, split_results) <-
+                            if budget > 1
+                                then par2 (merged_act, parList acts)
+                                else (,) <$> merged_act <*> sequence acts
+                        let sets = ( concat [fs | (_, (fs, _)) <- split_results]
+                                   , S.unions [ns | (_, (_, ns)) <- split_results] )
+                        quality <- eval eval_u sets
+                        return (mres, (quality, sets))
+                    {- END AI-GENERATED CODE -}
                 return $ if split_quality > merged_quality
                     then (split_quality, split_sets)
                     else (merged_quality, merged_sets)
@@ -477,6 +492,13 @@ recPart bud gen merge eval = fmap snd . go bud gen ([], S.empty) newUnique newUn
 
 
         {- START AI-GENERATED CODE -}
+
+        -- | Pick a bridge if one exists (preferring the most balanced), else
+        -- fall back to the mass heuristic.
+        edge_policy_bridge :: RandomGen g => g -> G.Graph v -> Maybe (v, v, g)
+        edge_policy_bridge rng g = case G.getEdges g of
+            []    -> Nothing
+            _     -> let (x, y) = maybe (massEdge g) id (bestBridge g) in Just (x, y, rng)
 
         -- | Pick a bridge if one exists; else if there is a small (width <= 3)
         -- and balanced min-cut, cut across it; else fall back to mass.
