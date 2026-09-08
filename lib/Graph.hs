@@ -17,6 +17,9 @@ module Graph
     , getVerticesTopological
     , getEdgesTopological
 
+    , minCut
+    , bridges
+
     , dbgShow
     , dbgVerify
     ) where
@@ -26,7 +29,10 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Maybe (fromMaybe)
 import Data.Bifunctor
+import Control.Monad (forM_, when)
 import Control.Monad.State
+import Data.List (foldl', maximumBy, delete)
+import Data.Ord (comparing)
 
 import Data.Map ((!))
 
@@ -203,6 +209,126 @@ getEdgesTopological g = getVerticesTopological g >>= get_incoming
         get_incoming :: v -> [(v, v)]
         get_incoming k = (,k) <$> getPredecessors g k
 
+-- TODO: At least add tests
+{- START AI-GENERTED CODE -}
+
+-- | All bridges (cut-edges) of the graph, treated as undirected.
+-- A bridge is an edge whose removal disconnects the graph.
+-- Tarjan's algorithm, runs in O(V + E).
+bridges :: forall v . Ord v => Graph v -> [(v, v)]
+bridges (Graph m) = go $ execState (mapM_ (dfs Nothing) (M.keys m)) initSt
+    where
+        neigh :: v -> [v]
+        neigh v = S.toList (fst (m M.! v)) ++ S.toList (snd (m M.! v))
+
+        -- Return the bridge in the graph's actual (directed) edge direction,
+        -- since the DFS tree edge (v, w) may traverse a predecessor instead
+        -- of a successor.
+        dirEdge :: v -> v -> (v, v)
+        dirEdge v w = if w `S.member` fst (m M.! v) then (v, w) else (w, v)
+
+        initSt :: (M.Map v Int, M.Map v Int, Int, [(v, v)])
+        initSt = (M.empty, M.empty, 0, [])
+
+        go :: (M.Map v Int, M.Map v Int, Int, [(v, v)]) -> [(v, v)]
+        go (_, _, _, b) = b
+
+        dfs :: Maybe v -> v -> State (M.Map v Int, M.Map v Int, Int, [(v, v)]) ()
+        dfs parent v = do
+            (vis, _, _, _) <- get
+            case M.lookup v vis of
+                Just _  -> pure ()
+                Nothing -> do
+                    (vis, low, tm, br) <- get
+                    put (M.insert v tm vis, M.insert v tm low, tm + 1, br)
+                    forM_ (neigh v) $ \w -> when (Just w /= parent) $ do
+                        (vis2, _, _, _) <- get
+                        case M.lookup w vis2 of
+                            Just wt -> do
+                                (v3, l3, t3, b3) <- get
+                                put (v3, M.adjust (min wt) v l3, t3, b3)
+                            Nothing -> do
+                                dfs (Just v) w
+                                (v4, l4, t4, b4) <- get
+                                let wLow  = l4 M.! w
+                                    vDisc = v4 M.! v
+                                put (v4, M.adjust (min wLow) v l4, t4
+                                        , if wLow > vDisc then dirEdge v w : b4 else b4)
+
+
+-- | Global minimum edge cut on the undirected view of the graph.
+-- Returns (cut width, one side of a witness cut). Stoer-Wagner, O(V * E).
+minCut :: forall v . Ord v => Graph v -> (Int, S.Set v)
+minCut (Graph m)
+    | M.null und = (0, S.empty)
+    | otherwise  = go (maxBound :: Int, S.empty) w0 orig0 ids0
+    where
+        und :: M.Map v (S.Set v)
+        und = M.map (\(s, p) -> S.union s p) m
+
+        idList :: [(v, Int)]
+        idList = zip (M.keys und) [0..]
+
+        idOf :: v -> Int
+        idOf x = M.fromList idList M.! x
+
+        orig0 :: M.Map Int (S.Set v)
+        orig0 = M.fromList [(i, S.singleton x) | (x, i) <- idList]
+
+        w0 :: M.Map (Int, Int) Int
+        w0 = M.fromList [ ((min i j, max i j), 1)
+                        | (x, ns) <- M.toList und, y <- S.toList ns
+                        , let i = idOf x, let j = idOf y, i < j ]
+
+        ids0 :: [Int]
+        ids0 = [0 .. M.size und - 1]
+
+        weight :: M.Map (Int, Int) Int -> Int -> Int -> Int
+        weight w a b = M.findWithDefault 0 (min a b, max a b) w
+
+        go :: (Int, S.Set v) -> M.Map (Int, Int) Int -> M.Map Int (S.Set v) -> [Int] -> (Int, S.Set v)
+        go best w orig ids
+            | length ids <= 1 = best
+            | otherwise =
+                let (cutW, tId, sId) = phase w ids
+                    best' = if cutW < fst best then (cutW, orig M.! tId) else best
+                    (w', orig', ids') = contract w orig ids sId tId
+                in go best' w' orig' ids'
+
+        phase :: M.Map (Int, Int) Int -> [Int] -> (Int, Int, Int)
+        phase w ids =
+            let start = head ids
+                added = mas w start (tail ids) [(start, 0)]
+                (tId, cutW) = head added
+                (sId, _)     = head (tail added)
+            in (cutW, tId, sId)
+
+        mas :: M.Map (Int, Int) Int -> Int -> [Int] -> [(Int, Int)] -> [(Int, Int)]
+        mas _ _ [] acc = acc
+        mas w cur rest acc =
+            let (x, wx) = maximumBy (comparing snd)
+                            [ (x, sum [weight w x a | (a, _) <- acc]) | x <- rest ]
+            in mas w x (delete x rest) ((x, wx) : acc)
+
+        contract :: M.Map (Int, Int) Int -> M.Map Int (S.Set v) -> [Int] -> Int -> Int
+                 -> (M.Map (Int, Int) Int, M.Map Int (S.Set v), [Int])
+        contract w orig ids s t =
+            let merged = (orig M.! s) `S.union` (orig M.! t)
+                orig'  = M.insert s merged (M.delete t orig)
+                others = filter (\x -> x /= s && x /= t) ids
+                w' = foldl' (mergeOne s t) (M.delete (min s t, max s t) w) others
+                ids' = filter (/= t) ids
+            in (w', orig', ids')
+          where
+            mergeOne s t acc x =
+                let wNew  = weight w s x + weight w t x
+                    keySx = (min s x, max s x)
+                    keyTx = (min t x, max t x)
+                in if wNew > 0
+                     then M.insert keySx wNew (M.delete keyTx acc)
+                     else M.delete keyTx (M.delete keySx acc)
+
+{- END AI-GENERTED CODE -}
 
 
 -- | Debug function to print the internal structure of the graph

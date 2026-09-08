@@ -36,6 +36,7 @@ import qualified Data.Map as M
 
 import qualified Control.Parallel.Strategies as PS (parList)
 import qualified System.Random as R (split)
+import Data.Ord (comparing)
 data Reg
     = OrigReg String
     | RenameReg String
@@ -443,7 +444,56 @@ recPart bud gen merge eval = fmap snd . go bud gen ([], S.empty) newUnique newUn
                     then (split_quality, split_sets)
                     else (merged_quality, merged_sets)
 
-        edge_policy = edge_policy_mass
+        edge_policy = edge_policy_mincut
+
+
+        {- START AI-GENERATED CODE -}
+
+        -- | Pick a bridge if one exists; else if there is a small (width <= 3)
+        -- and balanced min-cut, cut across it; else fall back to mass.
+        edge_policy_mincut :: RandomGen g => g -> G.Graph v -> Maybe (v, v, g)
+        edge_policy_mincut rng g = case G.getEdges g of
+            []    -> Nothing
+            _     -> let (x, y) = maybe (neckEdge g) id (bestBridge g) in Just (x, y, rng)
+          where
+            neckEdge g = case G.minCut g of
+                (l, side) | l <= 3 && balancedCut g side -> crossingEdge g side
+                _ -> massEdge g
+
+        -- Most balanced bridge (if any): the bridge whose removal splits the
+        -- graph into two most-equal halves, measured by edge count.
+        bestBridge :: G.Graph v -> Maybe (v, v)
+        bestBridge g = case G.bridges g of
+            [] -> Nothing
+            bs -> Just $ minimumBy (comparing balance) bs
+          where
+            balance (u, w) =
+                case map (length . G.getEdges) (G.getSubgraphs (G.removeEdge u w g)) of
+                    [n]    -> n                     -- leaf bridge: one side is empty
+                    [a, b] -> abs (a - b)
+                    _      -> error "bridge must split into 1 or 2 components"
+
+        -- Is this cut (given one side) balanced enough to be worth cutting?
+        balancedCut :: G.Graph v -> S.Set v -> Bool
+        balancedCut g side =
+            let n = S.size side
+                total = length (G.getVertices g)
+            in n >= 2 && (total - n) >= 2
+
+        -- An edge crossing the cut (one endpoint in `side`, the other not).
+        crossingEdge :: G.Graph v -> S.Set v -> (v, v)
+        crossingEdge g side =
+            head [ (u, w) | (u, w) <- G.getEdges g, S.member u side /= S.member w side ]
+
+
+        -- The mass heuristic's edge pick, extracted for reuse.
+        massEdge :: G.Graph v -> (v, v)
+        massEdge g = minimumBy (comparing evalEdge) (G.getEdges g)
+          where
+            (intos, outs) = G.getMassMaps g
+            evalEdge (f, t) = abs $ (intos M.! f) - (outs M.! t)
+
+        {- END AI-GENERATED CODE -}
 
         -- | The whole algorithm "chops" one edge away each iteration,
         -- hoping to "chop" the graph in half. This function "aims" the
