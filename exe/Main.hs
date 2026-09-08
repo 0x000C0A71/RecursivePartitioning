@@ -364,6 +364,33 @@ type Fusion v = (v, v, v)
 type NoFusion v = (v, v)
 type FuseNoFuses v = ([Fusion v], S.Set (NoFusion v))
 
+
+
+{- START AI-GENERATED CODE -}
+
+-- | Fuse a producer `from` into every one of its consumers (successors).
+--
+-- Each outgoing edge `from -> s` is merged into its own fresh vertex, so the
+-- producer is cloned into each consumer and then disappears. Threads the merge
+-- function and the unique source; returns the accumulated fusion triples, the
+-- transformed graph, and the updated unique source.
+fuseAll :: (Ord v, Monad m)
+        => (Unique -> v -> v -> m (v, Unique))
+        -> Unique
+        -> v          -- ^ producer
+        -> [v]        -- ^ its consumers (successors)
+        -> G.Graph v
+        -> m ([Fusion v], G.Graph v, Unique)
+fuseAll merge u from succs g = go u succs g
+    where
+        go u [] g = return ([], g, u)
+        go u (s:ss) g = do
+            (name, u') <- merge u from s
+            (rest, g', u'') <- go u' ss (G.mergeEdge from s name g)
+            return ((from, s, name) : rest, g', u'')
+
+{- END AI-GENERATED CODE -}
+
 -- | Perform recursive partitioning on a graph
 --
 -- Searches for the optimal set of edges to fuse such that a
@@ -395,18 +422,25 @@ recPart bud gen merge eval = fmap snd . go bud gen ([], S.empty) newUnique newUn
         go :: Budget -> StdGen -> FuseNoFuses v -> Unique -> Unique -> G.Graph v -> m (q, FuseNoFuses v)
         go !budget !rng !f !merge_u !eval_u !g = case edge_policy rng g of
             Nothing -> (,f) <$> eval eval_u f
-            Just (from, to, rng') -> do
-                (merged, merge_u') <- merge merge_u from to
+            Just (from, _, rng') -> do
+                {- START AI-GENERATED CODE -}
+                let succs = G.getSuccessors g from
 
-                let with_merged = first ((from, to, merged):) f
-                let with_split = second (S.insert (from, to)) f
+                (merged_triples, merged_graph, merge_u') <- fuseAll merge merge_u from succs g
+
+                let no_fuse_edges = [(from, s) | s <- succs]
+                let with_merged = first (merged_triples ++) f
+                let with_split = second (S.union (S.fromList no_fuse_edges)) f
+                let split_graph = foldr (uncurry G.removeEdge) g no_fuse_edges
+                {- END AI-GENERATED CODE -}
 
                 let eval_u' = next eval_u
                 let (eval_u1, eval_u2) = split2 eval_u'
 
+
                 let (rng1, rng2) = R.split rng'
-                let merged_act = go (budget/2) rng1 with_merged merge_u' eval_u1 $ G.mergeEdge from to merged g
-                ((merged_quality, merged_sets), (split_quality , split_sets)) <- case G.getSubgraphs $ G.removeEdge from to g of
+                let merged_act = go (budget/2) rng1 with_merged merge_u' eval_u1 merged_graph
+                ((merged_quality, merged_sets), (split_quality , split_sets)) <- case G.getSubgraphs split_graph of
                     []  -> do
                         mres <- merged_act
                         quality <- eval eval_u with_split
