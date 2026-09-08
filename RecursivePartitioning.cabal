@@ -133,6 +133,8 @@ executable RecursivePartitioning
         directory,
         async,
         random,
+        stm,
+        time,
 
     ghc-options: -threaded -rtsopts
 
