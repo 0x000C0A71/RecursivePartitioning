@@ -12,7 +12,9 @@ import qualified Graph as G
 import Unique
 
 import Control.Concurrent          (Chan(), writeChan, readChan, newChan)
+import Control.Concurrent          (threadDelay)
 import Control.Concurrent.Async    (wait, withAsync, mapConcurrently)
+import Control.Concurrent.STM      (readTVarIO, writeTVar, TVar, readTVar, atomically, newTVarIO)
 import Control.Monad.Reader        (ReaderT(), ask, runReaderT)
 import Control.Monad.Trans         (lift)
 import Control.Monad.Writer        (Writer(), writer, runWriter, execWriter)
@@ -20,6 +22,7 @@ import Control.Parallel.Strategies (using, parTuple2, evalTuple2, rseq, rdeepseq
 import Data.Bifunctor              (first, second, bimap)
 import Data.Foldable               (minimumBy)
 import Data.Monoid                 (Sum(Sum))
+import Data.Time                   (UTCTime, getCurrentTime, diffUTCTime)
 import GHC.Conc                    (numCapabilities)
 import System.Directory            (doesFileExist, removeFile, createDirectoryIfMissing, getCurrentDirectory, makeAbsolute)
 import System.Environment          (lookupEnv, getArgs, getEnvironment)
@@ -33,7 +36,6 @@ import qualified Data.Map as M
 
 import qualified Control.Parallel.Strategies as PS (parList)
 import qualified System.Random as R (split)
-
 data Reg
     = OrigReg String
     | RenameReg String
@@ -108,30 +110,52 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
     let num_edges' = length $ G.getEdges graph'
     putStrLn $ "Dropped out to " ++ show num_edges' ++ " edges"
 
+    eval_counter <- newTVarIO 0
+
+    let !total_eval_count =
+            let compute = recPart thread_budget rng_gen merge eval_eval_c graph'
+                (_, res) = runCounterM compute
+            in res
+
     if calc_eval_count
-        then let
-            compute = recPart thread_budget rng_gen merge eval_eval_c graph'
-            (_, res) = runCounterM compute
-            in return $ Left res
+        then return $ Left total_eval_count
         else do
             log_channel <- newChan
 
-            let compute = recPart thread_budget rng_gen merge (eval base_env log_channel compname) graph'
+            let compute = recPart thread_budget rng_gen merge (eval eval_counter base_env log_channel compname) graph'
 
-            withAsync (log_thread log_channel) $ \logger -> do
-                res <- compute
-                writeChan log_channel LogEnd
-                wait logger
-                return $ Right res
+            start_time <- getCurrentTime
+            withAsync (log_thread log_channel) $ \logger ->
+                withAsync (update_thread eval_counter total_eval_count start_time) $ \_ -> do
+                    res <- compute
+                    writeChan log_channel LogEnd
+                    wait logger
+                    return $ Right res
     where
+        update_thread :: TVar Int -> Int -> UTCTime -> IO ()
+        update_thread counter total_evals start_time = go
+            where
+                go :: IO ()
+                go = do
+                    threadDelay 1000000
+                    time_now <- getCurrentTime
+                    counter_now <- readTVarIO counter
+                    let duration = time_now `diffUTCTime` start_time
+                    putStrLn
+                        $ "Running for "
+                        ++ show duration
+                        ++ ": (" ++ show counter_now ++ "/" ++ show total_evals ++ ")"
+                    go
+
+
         rng_gen :: StdGen
         rng_gen = mkStdGen 0xC0A71
 
         graph_dump_file :: FilePath
         graph_dump_file = workdir ++ "/graph"
 
-        eval :: [(String, String)] -> Chan LogMsg -> String -> Unique -> FuseNoFuses Reg -> IO Quality
-        eval base_env log_channel cname unique fnf = do
+        eval :: TVar Int -> [(String, String)] -> Chan LogMsg -> String -> Unique -> FuseNoFuses Reg -> IO Quality
+        eval eval_counter base_env log_channel cname unique fnf = do
 
             let instr_file = workdir ++ "/fnf" ++ show unique
             let out_file = workdir ++ "/force_out" ++ show unique
@@ -153,7 +177,10 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
                     removeFile instr_file
                     removeFile out_file
 
-                    writeChan log_channel $ LogEval fnf raw_stats quality
+                    --writeChan log_channel $ LogEval fnf raw_stats quality
+                    atomically $ do
+                        old <- readTVar eval_counter
+                        writeTVar eval_counter (old + 1)
 
                     return quality
                 False -> do
