@@ -11,17 +11,12 @@ module Main where
 import qualified Graph as G
 import Unique
 
-import Control.Concurrent          (Chan(), writeChan, readChan, newChan)
-import Control.Concurrent          (threadDelay)
+import Control.Concurrent          (Chan(), writeChan, readChan, newChan, threadDelay)
 import Control.Concurrent.Async    (wait, withAsync, mapConcurrently)
 import Control.Concurrent.STM      (readTVarIO, writeTVar, TVar, readTVar, atomically, newTVarIO)
-import Control.Monad.Reader        (ReaderT(), ask, runReaderT)
-import Control.Monad.Trans         (lift)
-import Control.Monad.Writer        (Writer(), writer, runWriter, execWriter)
 import Control.Parallel.Strategies (using, parTuple2, evalTuple2, rseq, rdeepseq)
-import Data.Bifunctor              (first, second, bimap)
+import Data.Bifunctor              (first, second)
 import Data.Foldable               (minimumBy)
-import Data.Monoid                 (Sum(Sum))
 import Data.Time                   (UTCTime, getCurrentTime, diffUTCTime)
 import GHC.Conc                    (numCapabilities)
 import System.Directory            (doesFileExist, removeFile, createDirectoryIfMissing, getCurrentDirectory, makeAbsolute)
