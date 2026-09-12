@@ -6,6 +6,16 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeApplications #-}
 
+-- TODO: make dropout ratio configurable
+-- TODO: allow for different droput policies
+-- TODO: add interface for disabling search
+-- TODO: add interface for disabling stdio logging of hlo-opt
+-- TODO: pull logic out into separate files. This one is getting crowded
+-- TODO: make ETA interval configurable
+-- TODO: add nicer ETA display
+-- TODO: implement bridge and neck policy correctly
+-- TODO: make "fuse all" configurable
+
 module Main where
 
 import qualified Graph as G
