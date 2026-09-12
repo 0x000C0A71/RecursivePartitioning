@@ -12,6 +12,7 @@
 -- TODO: add nicer ETA display
 -- TODO: implement bridge and neck policy correctly
 -- TODO: make "fuse all" configurable
+-- TODO: replace ai-generated code with human-generated code
 
 module Main where
 
