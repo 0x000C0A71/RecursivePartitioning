@@ -10,6 +10,7 @@ module Types
     , CounterM()
     , runCounterM
     , add, inc
+    , Eval(..)
     ) where
 
 import Control.Parallel.Strategies (evalTuple2, rseq, using, parTuple2, rdeepseq)
@@ -111,3 +112,14 @@ add = CounterM ()
 
 inc :: CounterM ()
 inc = add 1
+
+
+data Eval = Eval
+    { evalLeafInstrs   :: Int
+    , evalNumKernels   :: Int
+    , evalNumLaunches  :: Int
+    , evalBytesRead    :: Int
+    , evalBytesWritten :: Int
+    , evalFlops        :: Int
+    , evalExecNanos    :: Float
+    } deriving (Show, Eq)

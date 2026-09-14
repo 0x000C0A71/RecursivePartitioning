@@ -120,6 +120,7 @@ executable RecursivePartitioning
         Unique,
         RecPart,
         Types,
+        Parse,
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

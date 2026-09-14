@@ -7,7 +7,6 @@
 -- TODO: allow for different droput policies
 -- TODO: add interface for disabling search
 -- TODO: add interface for disabling stdio logging of hlo-opt
--- TODO: pull logic out into separate files. This one is getting crowded
 -- TODO: make ETA interval configurable
 -- TODO: implement bridge and neck policy correctly
 -- TODO: make "fuse all" configurable
@@ -19,6 +18,7 @@ import qualified Graph as G
 import Unique
 import Types
 import RecPart
+import Parse
 
 import Control.Concurrent          (Chan(), writeChan, readChan, newChan, threadDelay)
 import Control.Concurrent.Async    (wait, withAsync)
@@ -32,8 +32,6 @@ import System.Exit                 (ExitCode(..))
 import System.IO                   (Handle, withFile, IOMode(WriteMode))
 import System.Process              (CreateProcess(..), StdStream(UseHandle), createProcess_, waitForProcess, proc)
 import System.Random               (StdGen, mkStdGen)
-
-import qualified Data.Map as M
 
 
 splitOn :: Eq a => a -> [a] -> ([a], [a])
@@ -93,7 +91,7 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
 
     call_opt "forward-pass" $ ("XLA_RPOF_FORWARD_FILE", graph_dump_file) : base_env
 
-    [(compname, graph)] <- M.toList . readGraphs <$> readFile graph_dump_file
+    [(compname, graph)] <- parseGraphs <$> readFile graph_dump_file
 
     let num_edges = length $ G.getEdges graph
     putStrLn $ "Read computation '" ++ compname ++ "' with " ++ show num_edges ++ " edges"
@@ -155,7 +153,7 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
 
             let instr_file = workdir ++ "/fnf" ++ show unique
             let out_file = workdir ++ "/force_out" ++ show unique
-            writeFile instr_file $ encode cname $ first reverse  fnf
+            writeFile instr_file $ serializeFNF cname $ first reverse  fnf
 
             call_opt ("eval-" ++ show unique)
                 $ ("XLA_RPOF_FORCE_FILE"  , instr_file)
@@ -166,9 +164,8 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
 
             doesFileExist out_file >>= \case
                 True -> do
-                    raw_stats :: [Int] <- fmap read . lines <$> readFile out_file
-                    let [leaf_instrs, num_kernels, num_launches, bytes_read, bytes_written, flops, exec_nanos] :: [Float] = fromIntegral <$> raw_stats
-                    let quality = 1.0/exec_nanos
+                    ev <-parseEval <$> readFile out_file
+                    let quality = 1.0 / evalExecNanos ev
 
                     removeFile instr_file
                     removeFile out_file
@@ -227,47 +224,6 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
                 LogNoOutput suff -> putStrLn $ "!!! " ++ suff ++ " produced no output! Inspect!"
 
 
-
-
---(Reg, Reg, Reg)
-encode :: String -> FuseNoFuses Reg -> String
-encode cname (xs, _) = unlines $ do_one <$> xs
-    where
-        do_one :: Fusion Reg -> String
-        do_one (_, _, OrigReg _) = error "error"
-        do_one (from, to, RenameReg new) = unlines
-            [ cname
-            , fs
-            , show fi
-            , ts
-            , show ti
-            , new
-            ]
-            where
-                (fs, fi :: Int) = case from of
-                    OrigReg   s -> (s, 0)
-                    RenameReg s -> (s, 1)
-                (ts, ti :: Int) = case to of
-                    OrigReg   s -> (s, 0)
-                    RenameReg s -> (s, 1)
-
-
-
-
-type ParserState = (String, Reg, M.Map String (G.Graph Reg))
-
-
-readGraphs :: String -> M.Map String (G.Graph Reg)
-readGraphs = (\(_,_,v) -> v) . flip (foldl (flip (.)) id . fmap one_line . lines) (undefined, undefined, M.empty)
-    where
-        one_line :: String -> ParserState -> ParserState
-        one_line [] k = k
-        one_line ('!':rest) (_   , _ , graphs) = (rest, undefined, M.insert rest G.empty graphs)
-        one_line ('%':rest) (comp, _ , graphs) = (comp, OrigReg $ head $ words rest, graphs)
-        one_line ('$':rest) (comp, to, graphs) = (comp, to, M.adjust (G.addEdge from to) comp graphs)
-            where
-                from = OrigReg $ head $ words rest
-        one_line (c:_) _ = error $ "Malformed graph dump: Line starting with " ++ show c
 
 humanReadableDuration :: NominalDiffTime -> String
 humanReadableDuration t
