@@ -7,6 +7,7 @@
 -- TODO: implement bridge and neck policy correctly
 -- TODO: make "fuse all" configurable
 -- TODO: replace ai-generated code with human-generated code
+-- TODO: compare optimal FNF to baseline in terms of quality
 
 module Main where
 
