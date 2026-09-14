@@ -9,7 +9,6 @@
 -- TODO: add interface for disabling stdio logging of hlo-opt
 -- TODO: pull logic out into separate files. This one is getting crowded
 -- TODO: make ETA interval configurable
--- TODO: add nicer ETA display
 -- TODO: implement bridge and neck policy correctly
 -- TODO: make "fuse all" configurable
 -- TODO: replace ai-generated code with human-generated code
@@ -25,7 +24,7 @@ import Control.Concurrent          (Chan(), writeChan, readChan, newChan, thread
 import Control.Concurrent.Async    (wait, withAsync)
 import Control.Concurrent.STM      (readTVarIO, writeTVar, TVar, readTVar, atomically, newTVarIO)
 import Data.Bifunctor              (first)
-import Data.Time                   (UTCTime, getCurrentTime, diffUTCTime)
+import Data.Time                   (UTCTime, getCurrentTime, diffUTCTime, NominalDiffTime, nominalDiffTimeToSeconds)
 import GHC.Conc                    (numCapabilities)
 import System.Directory            (doesFileExist, removeFile, createDirectoryIfMissing, getCurrentDirectory, makeAbsolute)
 import System.Environment          (lookupEnv, getArgs, getEnvironment)
@@ -130,14 +129,18 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
             where
                 go :: IO ()
                 go = do
-                    threadDelay 1000000
+                    threadDelay 20000000
                     time_now <- getCurrentTime
                     counter_now <- readTVarIO counter
                     let duration = time_now `diffUTCTime` start_time
+                    let eval_rate = fromIntegral counter_now / nominalDiffTimeToSeconds duration
+                    let time_remaining = duration / fromIntegral counter_now * fromIntegral (total_evals-counter_now)
                     putStrLn
                         $ "Running for "
-                        ++ show duration
-                        ++ ": (" ++ show counter_now ++ "/" ++ show total_evals ++ ")"
+                        ++ humanReadableDuration duration
+                        ++ ": (" ++ show counter_now ++ "/" ++ show total_evals
+                        ++ ": " ++ show eval_rate ++ "e/s) "
+                        ++ "ETA " ++ humanReadableDuration time_remaining
                     go
 
 
@@ -266,5 +269,21 @@ readGraphs = (\(_,_,v) -> v) . flip (foldl (flip (.)) id . fmap one_line . lines
                 from = OrigReg $ head $ words rest
         one_line (c:_) _ = error $ "Malformed graph dump: Line starting with " ++ show c
 
+humanReadableDuration :: NominalDiffTime -> String
+humanReadableDuration t
+    =  show d_part ++ "d "
+    ++ show h_part ++ "h "
+    ++ show m_part ++ "m "
+    ++ show s_part ++ "s"
+    where
+        seconds :: Int
+        seconds = round $ nominalDiffTimeToSeconds t
+        minutes = seconds `div` 60
+        hours   = minutes `div` 60
+        days    = hours   `div` 24
 
+        d_part = days
+        h_part = hours   `mod` 24
+        m_part = minutes `mod` 60
+        s_part = seconds `mod` 60
 
