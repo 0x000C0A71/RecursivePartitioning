@@ -3,11 +3,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE FlexibleInstances #-}
 
--- TODO: make dropout ratio configurable
 -- TODO: allow for different droput policies
--- TODO: add interface for disabling search
--- TODO: add interface for disabling stdio logging of hlo-opt
--- TODO: make ETA interval configurable
 -- TODO: implement bridge and neck policy correctly
 -- TODO: make "fuse all" configurable
 -- TODO: replace ai-generated code with human-generated code
@@ -25,12 +21,11 @@ import Control.Concurrent.Async    (wait, withAsync)
 import Control.Concurrent.STM      (readTVarIO, writeTVar, TVar, readTVar, atomically, newTVarIO)
 import Data.Bifunctor              (first)
 import Data.Time                   (UTCTime, getCurrentTime, diffUTCTime, NominalDiffTime, nominalDiffTimeToSeconds)
-import GHC.Conc                    (numCapabilities)
-import System.Directory            (doesFileExist, removeFile, createDirectoryIfMissing, getCurrentDirectory, makeAbsolute)
+import System.Directory            (doesFileExist, removeFile, createDirectoryIfMissing)
 import System.Environment          (lookupEnv, getArgs, getEnvironment)
 import System.Exit                 (ExitCode(..))
-import System.IO                   (Handle, withFile, IOMode(WriteMode))
-import System.Process              (CreateProcess(..), StdStream(UseHandle), createProcess_, waitForProcess, proc)
+import System.IO                   (withFile, IOMode(WriteMode))
+import System.Process              (CreateProcess(..), StdStream(UseHandle, NoStream), createProcess_, waitForProcess, proc)
 import System.Random               (StdGen, mkStdGen)
 
 
@@ -64,15 +59,9 @@ main = do
 
     (my_args, hlo_opt_args) <- splitOn "--" <$> getArgs
 
-    hlo_path <- case my_args of
-        [path] -> makeAbsolute path
-        _ -> return $ error "Expected path to hlo module as singular cmd line arg"
+    config <- makeConfigAbsolute $ parseArgs my_args
 
-    workdir <- getCurrentDirectory >>= makeAbsolute
-
-    let max_budget = fromIntegral $ numCapabilities * 4
-
-    fnf <- runOn False max_budget hlo_opt hlo_opt_args workdir hlo_path
+    fnf <- runOn config hlo_opt hlo_opt_args
     print fnf
 
 
@@ -83,8 +72,8 @@ data LogMsg
     deriving (Show)
 
 
-runOn :: Bool -> Budget -> FilePath -> [String] -> FilePath -> FilePath -> IO (Either (Int) (FuseNoFuses Reg))
-runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
+runOn :: Config -> FilePath -> [String] -> IO (Either Int (FuseNoFuses Reg))
+runOn config hlo_opt hlo_opt_args = do
     createDirectoryIfMissing True opt_logs
 
     base_env <- getEnvironment
@@ -96,21 +85,23 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
     let num_edges = length $ G.getEdges graph
     putStrLn $ "Read computation '" ++ compname ++ "' with " ++ show num_edges ++ " edges"
 
-    let graph' = dropout 0.0 graph
-    let num_edges' = length $ G.getEdges graph'
-    putStrLn $ "Dropped out to " ++ show num_edges' ++ " edges"
+    let graph' = case configDropout config of
+            Just ratio -> dropout ratio graph
+            Nothing    -> graph
 
-    eval_counter <- newTVarIO 0
+    let num_edges' = length $ G.getEdges graph'
+    putStrLn $ "Working with " ++ show num_edges' ++ " edges"
 
     let !total_eval_count =
             let compute = recPart thread_budget rng_gen merge eval_eval_c graph'
                 (_, res) = runCounterM compute
             in res
 
-    if calc_eval_count
+    if configOnlyCountEvals config
         then return $ Left total_eval_count
         else do
-            log_channel <- newChan
+            eval_counter <- newTVarIO 0
+            log_channel  <- newChan
 
             let compute = recPart thread_budget rng_gen merge (eval eval_counter base_env log_channel compname) graph'
 
@@ -122,12 +113,16 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
                     wait logger
                     return $ Right res
     where
+        -- extracting config variables
+        thread_budget = configThreadBudget config
+        workdir       = configWorkingDir config
+
         update_thread :: TVar Int -> Int -> UTCTime -> IO ()
         update_thread counter total_evals start_time = go
             where
                 go :: IO ()
                 go = do
-                    threadDelay 20000000
+                    threadDelay $ configEtaInterval config
                     time_now <- getCurrentTime
                     counter_now <- readTVarIO counter
                     let duration = time_now `diffUTCTime` start_time
@@ -161,7 +156,6 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
                 : ("XLA_RPOF_COMPUTATION" , cname)
                 : base_env
 
-
             doesFileExist out_file >>= \case
                 True -> do
                     ev <-parseEval <$> readFile out_file
@@ -180,9 +174,6 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
                     writeChan log_channel $ LogNoOutput $ show unique
                     return 0
 
-
-
-
         merge :: Monad m => Unique -> Reg -> Reg -> m (Reg, Unique)
         merge u _ _ = return (RenameReg $ "tmp" ++ show u, u')
             where
@@ -194,10 +185,15 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
         opt_logs :: FilePath
         opt_logs = workdir ++ "/opt-logs"
 
+        withLog :: FilePath -> (StdStream -> IO r) -> IO r
+        withLog path fn = if configHloOptLog config
+            then withFile path WriteMode (fn . UseHandle)
+            else fn NoStream
+
         call_opt :: String -> [(String, String)] -> IO ()
         call_opt suffix opt_env =
-            withFile opt_out WriteMode $ \opt_out_hdl ->
-            withFile opt_err WriteMode $ \opt_err_hdl -> do
+            withLog opt_out $ \opt_out_hdl ->
+            withLog opt_err $ \opt_err_hdl -> do
                 let cp = create_process opt_out_hdl opt_err_hdl
                 (_, _, _, process_handle) <- createProcess_ "call_opt" cp
                 waitForProcess process_handle >>= \case
@@ -206,10 +202,10 @@ runOn calc_eval_count thread_budget hlo_opt hlo_opt_args workdir hlo_path = do
                         print cp
                         error $ "opt failed with exit code " ++ show e ++ ". Logs at " ++ opt_out ++ " & " ++ opt_err
             where
-                create_process :: Handle -> Handle -> CreateProcess
-                create_process opt_out_hdl opt_err_hdl = (proc hlo_opt $ hlo_opt_args ++ [hlo_path])
-                    { std_out = UseHandle opt_out_hdl
-                    , std_err = UseHandle opt_err_hdl
+                create_process :: StdStream -> StdStream -> CreateProcess
+                create_process opt_out_hdl opt_err_hdl = (proc hlo_opt $ hlo_opt_args ++ [configHloPath config])
+                    { std_out = opt_out_hdl
+                    , std_err = opt_err_hdl
                     , env     = Just opt_env
                     }
 

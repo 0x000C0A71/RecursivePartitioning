@@ -4,6 +4,7 @@ module Parse
     ( parseGraphs
     , serializeFNF
     , parseEval
+    , parseArgs
     ) where
 
 import Types
@@ -52,7 +53,7 @@ parseGraphs
         one_line (c:_) _ = error $ "Malformed graph dump: Line starting with " ++ show c
 
 
-parseEval :: String ->Eval
+parseEval :: String -> Eval
 parseEval contents = Eval
     { evalLeafInstrs   = read leaf_instrs
     , evalNumKernels   = read num_kernels
@@ -64,3 +65,24 @@ parseEval contents = Eval
     }
     where
         [leaf_instrs, num_kernels, num_launches, bytes_read, bytes_written, flops, exec_nanos] = lines contents
+
+
+parseArgs :: [String] -> Config
+parseArgs = go Nothing
+    where
+        go :: Maybe FilePath -> [String] -> Config
+
+        go Nothing     [] = defaultConfig
+        go (Just path) [] = defaultConfig { configHloPath = path }
+
+        go fp ("--dropout"           :num     :rest) = (go fp rest) { configDropout        = Just $ read num }
+        go fp ("--dropout-policy"    :policy  :rest) = (go fp rest) { configDropoutPolicy  = read policy   }
+        go fp ("--eta-interval-us"   :interval:rest) = (go fp rest) { configEtaInterval    = read interval }
+        go fp ("--working-directory" :work_dir:rest) = (go fp rest) { configWorkingDir     = work_dir      }
+        go fp ("--thread-budget"     :budget  :rest) = (go fp rest) { configThreadBudget   = read budget   }
+        go fp ("--count-only"                 :rest) = (go fp rest) { configOnlyCountEvals = True          }
+        go fp ("--log-hlo-opt"                :rest) = (go fp rest) { configHloOptLog      = True          }
+        go fp ("--fuse-all-consumers"         :rest) = (go fp rest) { configGraphFuseAll   = True          }
+
+        go Nothing (path:rest) = go (Just path) rest
+        go (Just _) (second:_) = error $ "Cannot pass multiple hlo modules '" ++ second ++ "'"

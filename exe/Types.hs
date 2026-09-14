@@ -11,13 +11,19 @@ module Types
     , runCounterM
     , add, inc
     , Eval(..)
+
+    , DropoutPolicy(..)
+    , Config(..), defaultConfig
+    , makeConfigAbsolute
     ) where
 
 import Control.Parallel.Strategies (evalTuple2, rseq, using, parTuple2, rdeepseq)
 import Control.Concurrent.Async    (withAsync, wait, mapConcurrently)
+import System.Directory            (makeAbsolute)
 
 import qualified Data.Set                    as S
 import qualified Control.Parallel.Strategies as PS
+import GHC.Conc (numCapabilities)
 
 
 data Reg
@@ -123,3 +129,41 @@ data Eval = Eval
     , evalFlops        :: Int
     , evalExecNanos    :: Float
     } deriving (Show, Eq)
+
+
+
+data DropoutPolicy = DropoutBeginning deriving (Show, Eq, Read)
+
+data Config = Config
+    { configDropout        :: Maybe Double
+    , configDropoutPolicy  :: DropoutPolicy
+    , configOnlyCountEvals :: Bool
+    , configHloOptLog      :: Bool
+    , configEtaInterval    :: Int
+    , configGraphFuseAll   :: Bool
+    , configHloPath        :: FilePath
+    , configWorkingDir     :: FilePath
+    , configThreadBudget   :: Double
+    } deriving (Show, Eq)
+
+defaultConfig :: Config
+defaultConfig = Config
+    { configDropout        = Nothing
+    , configDropoutPolicy  = DropoutBeginning
+    , configOnlyCountEvals = False
+    , configHloOptLog      = False
+    , configEtaInterval    = 20000000
+    , configGraphFuseAll   = False
+    , configHloPath        = error "Expected path to hlo module"
+    , configWorkingDir     = "."
+    , configThreadBudget   = fromIntegral $ numCapabilities * 4
+    }
+
+makeConfigAbsolute :: Config -> IO Config
+makeConfigAbsolute cfg = do
+    hlo_path <- makeAbsolute $ configHloPath cfg
+    work_dir <- makeAbsolute $ configWorkingDir cfg
+    return cfg
+        { configHloPath    = hlo_path
+        , configWorkingDir = work_dir
+        }
