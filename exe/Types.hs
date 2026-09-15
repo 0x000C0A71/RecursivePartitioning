@@ -147,6 +147,7 @@ data Config = Config
     , configHloPath        :: FilePath
     , configWorkingDir     :: FilePath
     , configThreadBudget   :: Double
+    , configEvalRate       :: Double
     } deriving (Show, Eq)
 
 defaultConfig :: Config
@@ -160,6 +161,7 @@ defaultConfig = Config
     , configHloPath        = error "Expected path to hlo module"
     , configWorkingDir     = "."
     , configThreadBudget   = fromIntegral $ numCapabilities * 4
+    , configEvalRate       = 60
     }
 
 makeConfigAbsolute :: Config -> IO Config

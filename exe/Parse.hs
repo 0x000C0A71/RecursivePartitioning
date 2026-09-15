@@ -80,6 +80,7 @@ parseArgs = go Nothing
         go fp ("--eta-interval-us"   :interval:rest) = (go fp rest) { configEtaInterval    = read interval }
         go fp ("--working-directory" :work_dir:rest) = (go fp rest) { configWorkingDir     = work_dir      }
         go fp ("--thread-budget"     :budget  :rest) = (go fp rest) { configThreadBudget   = read budget   }
+        go fp ("--estimate-eval-rate":rate    :rest) = (go fp rest) { configEvalRate       = read rate     }
         go fp ("--count-only"                 :rest) = (go fp rest) { configOnlyCountEvals = True          }
         go fp ("--log-hlo-opt"                :rest) = (go fp rest) { configHloOptLog      = True          }
         go fp ("--fuse-all-consumers"         :rest) = (go fp rest) { configGraphFuseAll   = True          }

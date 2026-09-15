@@ -19,7 +19,7 @@ import Control.Concurrent          (Chan(), writeChan, readChan, newChan, thread
 import Control.Concurrent.Async    (wait, withAsync)
 import Control.Concurrent.STM      (readTVarIO, writeTVar, TVar, readTVar, atomically, newTVarIO)
 import Data.Bifunctor              (first)
-import Data.Time                   (UTCTime, getCurrentTime, diffUTCTime, NominalDiffTime, nominalDiffTimeToSeconds)
+import Data.Time                   (UTCTime, getCurrentTime, diffUTCTime, NominalDiffTime, nominalDiffTimeToSeconds, secondsToNominalDiffTime)
 import System.Directory            (doesFileExist, removeFile, createDirectoryIfMissing)
 import System.Environment          (lookupEnv, getArgs, getEnvironment)
 import System.Exit                 (ExitCode(..))
@@ -97,7 +97,11 @@ runOn config hlo_opt hlo_opt_args = do
 
     if configOnlyCountEvals config
         then do
+            let eval_rate = configEvalRate config
+            let time_per_eval = secondsToNominalDiffTime $ fromRational $ toRational $ 1 / eval_rate
+            let total_time = time_per_eval * fromIntegral total_eval_count
             putStrLn $ "Number of evaluations: " ++ show total_eval_count
+            putStrLn $ "Time to compute: " ++ humanReadableDuration total_time ++ " (assuming eval rate of " ++ show eval_rate ++ "e/s)"
         else do
             eval_counter <- newTVarIO 0
             log_channel  <- newChan
