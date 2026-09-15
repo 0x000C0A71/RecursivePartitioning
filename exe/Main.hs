@@ -27,7 +27,8 @@ import System.IO                   (withFile, IOMode(WriteMode))
 import System.Process              (CreateProcess(..), StdStream(UseHandle, NoStream), createProcess_, waitForProcess, proc)
 import System.Random               (StdGen, mkStdGen)
 import Data.Foldable               (find, maximumBy)
-import Data.Ord (comparing)
+import Data.Ord                    (comparing)
+import Control.Exception           (try, SomeException)
 
 
 splitOn :: Eq a => a -> [a] -> ([a], [a])
@@ -199,29 +200,34 @@ runOn config hlo_opt hlo_opt_args = do
             let out_file   = workdir ++ "/force_out" ++ show unique
             writeFile instr_file $ serializeFNF cname $ first reverse  fnf
 
-            call_opt ("eval-" ++ show unique)
+            retcode <- try $ call_opt ("eval-" ++ show unique)
                 $ ("XLA_RPOF_FORCE_FILE"  , instr_file)
                 : ("XLA_RPOF_QUALITY_FILE", out_file)
                 : ("XLA_RPOF_COMPUTATION" , cname)
                 : base_env
 
-            doesFileExist out_file >>= \case
-                True -> do
-                    ev <- parseEval <$> readFile out_file
-                    let quality = 1.0 / evalExecNanos ev
-
-                    removeFile instr_file
-                    removeFile out_file
-
-                    --writeChan log_channel $ LogEval fnf raw_stats quality
-                    atomically $ do
-                        old <- readTVar eval_counter
-                        writeTVar eval_counter (old + 1)
-
-                    return quality
-                False -> do
-                    writeChan log_channel $ LogNoOutput $ show unique
+            case retcode of
+                Left ex -> do
+                    print (ex :: SomeException)
+                    putStrLn "assuming 0 quality"
                     return 0
+                Right () -> doesFileExist out_file >>= \case
+                    True -> do
+                        ev <- parseEval <$> readFile out_file
+                        let quality = 1.0 / evalExecNanos ev
+
+                        removeFile instr_file
+                        removeFile out_file
+
+                        --writeChan log_channel $ LogEval fnf raw_stats quality
+                        atomically $ do
+                            old <- readTVar eval_counter
+                            writeTVar eval_counter (old + 1)
+
+                        return quality
+                    False -> do
+                        writeChan log_channel $ LogNoOutput $ show unique
+                        return 0
 
         merge :: Monad m => Unique -> Reg -> Reg -> m (Reg, Unique)
         merge u _ _ = return (RenameReg $ "tmp" ++ show u, u')
