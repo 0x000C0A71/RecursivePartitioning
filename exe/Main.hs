@@ -26,6 +26,7 @@ import System.Exit                 (ExitCode(..))
 import System.IO                   (withFile, IOMode(WriteMode))
 import System.Process              (CreateProcess(..), StdStream(UseHandle, NoStream), createProcess_, waitForProcess, proc)
 import System.Random               (StdGen, mkStdGen)
+import Data.Foldable               (find)
 
 
 splitOn :: Eq a => a -> [a] -> ([a], [a])
@@ -78,7 +79,19 @@ runOn config hlo_opt hlo_opt_args = do
 
     call_opt "forward-pass" $ ("XLA_RPOF_FORWARD_FILE", graph_dump_file) : base_env
 
-    [(compname, graph)] <- parseGraphs <$> readFile graph_dump_file
+    comp_list <- parseGraphs <$> readFile graph_dump_file
+
+    let available_comp_text = "Available computations are: " ++ show (fst <$> comp_list)
+
+    let (compname, graph) = case configCompName config of
+            Just name -> case find ((name ==) . fst) comp_list of
+                Just x  -> x
+                Nothing -> error $ "No such computation! " ++ available_comp_text
+            Nothing -> case comp_list of
+                [x] -> x
+                []  -> error "Module contains no computations"
+                _   -> error $ "Module contains more than 1 computation. Please pick one. " ++ available_comp_text
+
 
     let num_edges = length $ G.getEdges graph
     putStrLn $ "Read computation '" ++ compname ++ "' with " ++ show num_edges ++ " edges"

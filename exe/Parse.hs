@@ -37,7 +37,7 @@ serializeFNF cname (xs, _) = unlines $ do_one <$> xs
 
 type ParserState = (String, Reg, M.Map String (G.Graph Reg))
 
-parseGraphs :: String ->[(String, G.Graph Reg)]
+parseGraphs :: String -> [(String, G.Graph Reg)]
 parseGraphs
     = M.toList
     . (\(_,_,v) -> v)
@@ -81,6 +81,7 @@ parseArgs = go Nothing
         go fp ("--working-directory" :work_dir:rest) = (go fp rest) { configWorkingDir     = work_dir      }
         go fp ("--thread-budget"     :budget  :rest) = (go fp rest) { configThreadBudget   = read budget   }
         go fp ("--estimate-eval-rate":rate    :rest) = (go fp rest) { configEvalRate       = read rate     }
+        go fp ("--computation"       :compname:rest) = (go fp rest) { configCompName       = Just compname }
         go fp ("--count-only"                 :rest) = (go fp rest) { configOnlyCountEvals = True          }
         go fp ("--log-hlo-opt"                :rest) = (go fp rest) { configHloOptLog      = True          }
         go fp ("--fuse-all-consumers"         :rest) = (go fp rest) { configGraphFuseAll   = True          }

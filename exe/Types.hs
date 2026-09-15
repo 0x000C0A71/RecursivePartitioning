@@ -148,6 +148,7 @@ data Config = Config
     , configWorkingDir     :: FilePath
     , configThreadBudget   :: Double
     , configEvalRate       :: Double
+    , configCompName       :: Maybe String
     } deriving (Show, Eq)
 
 defaultConfig :: Config
@@ -162,6 +163,7 @@ defaultConfig = Config
     , configWorkingDir     = "."
     , configThreadBudget   = fromIntegral $ numCapabilities * 4
     , configEvalRate       = 60
+    , configCompName       = Nothing
     }
 
 makeConfigAbsolute :: Config -> IO Config
