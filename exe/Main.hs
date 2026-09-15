@@ -259,6 +259,6 @@ humanReadableDuration t
         s_part = seconds `mod` 60
 
         d_padded = show d_part
-        h_padded = (if h_part >= 10 then " " else "") ++ show h_part
-        m_padded = (if m_part >= 10 then " " else "") ++ show m_part
-        s_padded = (if s_part >= 10 then " " else "") ++ show s_part
+        h_padded = (if h_part < 10 then " " else "") ++ show h_part
+        m_padded = (if m_part < 10 then " " else "") ++ show m_part
+        s_padded = (if s_part < 10 then " " else "") ++ show s_part
