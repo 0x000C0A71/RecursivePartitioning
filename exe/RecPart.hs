@@ -8,7 +8,8 @@ module RecPart
     ) where
 
 import qualified Graph as G
-import Unique
+import qualified Unique
+import Unique (Unique, newUnique)
 import Types
 
 import System.Random  (StdGen, RandomGen, uniformR)
@@ -20,31 +21,52 @@ import qualified Data.Set      as S
 import qualified Data.Map      as M
 import qualified System.Random as R
 
-
-{- START AI-GENERATED CODE -}
-
--- | Fuse a producer `from` into every one of its consumers (successors).
---
--- Each outgoing edge `from -> s` is merged into its own fresh vertex, so the
--- producer is cloned into each consumer and then disappears. Threads the merge
--- function and the unique source; returns the accumulated fusion triples, the
--- transformed graph, and the updated unique source.
-fuseAll :: (Ord v, Monad m)
-        => (Unique -> v -> v -> m (v, Unique))
-        -> Unique
-        -> v          -- ^ producer
-        -> [v]        -- ^ its consumers (successors)
-        -> G.Graph v
-        -> m ([Fusion v], G.Graph v, Unique)
-fuseAll merge u from succs g = go u succs g
+mergeMultiple
+    :: forall v m . (Ord v, Monad m)
+    => (Unique -> v -> v -> m (v, Unique))
+    -> v
+    -> Unique
+    -> [v]
+    -> G.Graph v
+    -> m ([Fusion v], (G.Graph v, Unique))
+mergeMultiple merge_fn from = go
     where
-        go u [] g = return ([], g, u)
-        go u (s:ss) g = do
-            (name, u') <- merge u from s
-            (rest, g', u'') <- go u' ss (G.mergeEdge from s name g)
-            return ((from, s, name) : rest, g', u'')
+        go :: Unique -> [v] -> G.Graph v -> m ([Fusion v], (G.Graph v, Unique))
+        go unique [] g = return ([], (g, unique))
+        go unique (to:rest) g = do
+            (new_name, unique') <- merge_fn unique from to
+            let new_entry = (from, to, new_name)
+            first (new_entry:) <$> go unique' rest (G.mergeEdge from to new_name g)
 
-{- END AI-GENERATED CODE -}
+
+class Splitable a where
+    primSplit :: Int -> a -> [a]
+
+    {-# INLINE split #-}
+    split :: Int -> a -> [a]
+    split 0 _ = []
+    split 1 v = [v]
+    split n v = primSplit n v
+
+instance Splitable StdGen where
+    primSplit = go []
+        where
+            go :: [StdGen] -> Int -> StdGen -> [StdGen]
+            go gens 1 gen = gen:gens
+            go gens n gen = go (a:gens) (n-1) b
+                where
+                    (a, b) = R.split gen
+
+instance Splitable Unique where
+    primSplit = Unique.split
+
+instance Splitable Budget where
+    primSplit n v = replicate n $ v / fromIntegral n
+
+($:) :: Splitable a => [a -> b] -> a -> [b]
+fns $: s = zipWith ($) fns $ split n s
+    where
+        n = length fns
 
 
 -- | Perform recursive partitioning on a graph
@@ -73,79 +95,76 @@ recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m)
 --{-# SPECIALIZE recPart @Reg @CounterM @Int #-}
 {-# SPECIALIZE recPart ::  Budget -> StdGen -> (Unique -> Reg -> Reg -> IO (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> IO Quality) -> G.Graph Reg -> IO (FuseNoFuses Reg) #-}
 {-# SPECIALIZE recPart ::  Budget -> StdGen -> (Unique -> Reg -> Reg -> CounterM (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> CounterM Int) -> G.Graph Reg -> CounterM (FuseNoFuses Reg) #-}
-recPart bud gen merge eval = fmap snd . go bud gen ([], S.empty) newUnique newUnique
+recPart bud gen merge eval ggg = snd <$> go ([], S.empty) ggg bud gen newUnique newUnique
     where
-        go :: Budget -> StdGen -> FuseNoFuses v -> Unique -> Unique -> G.Graph v -> m (q, FuseNoFuses v)
-        go !budget !rng !f !merge_u !eval_u !g = case edge_policy rng g of
+        go :: FuseNoFuses v -> G.Graph v -> Budget -> StdGen -> Unique -> Unique -> m (q, FuseNoFuses v)
+        go !f !g !budget !rng !merge_u !eval_u = case edge_policy rng g of
             Nothing -> (,f) <$> eval eval_u f
-            Just (from, _, rng') -> do
-                {- START AI-GENERATED CODE -}
-                let succs = G.getSuccessors g from
+            Just (from, to, rng') -> do
+                let succs = if fuse_into_all then G.getSuccessors g from else [to]
 
-                (merged_triples, merged_graph, merge_u') <- fuseAll merge merge_u from succs g
+                (merged_fusions, (merged_graph, merge_u')) <- mergeMultiple merge from merge_u succs g
+                let merged_fnf = first (merged_fusions ++) f
 
-                let no_fuse_edges = [(from, s) | s <- succs]
-                let with_merged = first (merged_triples ++) f
-                let with_split = second (S.union (S.fromList no_fuse_edges)) f
-                let split_graph = foldr (uncurry G.removeEdge) g no_fuse_edges
-                {- END AI-GENERATED CODE -}
+                let no_fuse_edges = (from,) <$> succs
+                let split_fnf     = second (S.union $ S.fromList no_fuse_edges) f
+                let split_graph   = foldr (uncurry G.removeEdge) g no_fuse_edges
 
-                let eval_u' = next eval_u
-                let (eval_u1, eval_u2) = split2 eval_u'
+                let merged_components = G.getSubgraphs merged_graph
+                let split_components  = G.getSubgraphs split_graph
+                let merged_c_count    = length merged_components
+                let split_c_count     = length split_components
 
+                let branches
+                        =  fmap (merged_fnf,) merged_components
+                        ++ fmap (split_fnf ,) split_components
+                let branch_count = merged_c_count + split_c_count
 
-                let (rng1, rng2) = R.split rng'
-                let merged_act = go (budget/2) rng1 with_merged merge_u' eval_u1 merged_graph
-                ((merged_quality, merged_sets), (split_quality , split_sets)) <- case G.getSubgraphs split_graph of
-                    []  -> do
-                        mres <- merged_act
-                        quality <- eval eval_u with_split
-                        return (mres, (quality, f))
-                    [x] ->
-                        let unmerged_act = go (budget/2) rng2 with_split merge_u' eval_u2 x
-                        in if budget > 1
-                            then par2 (merged_act, unmerged_act)
-                            else (,) <$> merged_act <*> unmerged_act
-                    [x1, x2] -> do
-                        let (eval_us1,  eval_us2 ) = split2 eval_u2
-                        let (merge_us1, merge_us2) = split2 merge_u'
-                        let go' = go (budget/4) rng2 with_split
-                        let act1 = go' merge_us1 eval_us1 x1
-                        let act2 = go' merge_us2 eval_us2 x2
-                        (mres, (_, (fuse1, nfuse1)), (_, (fuse2, nfuse2))) <- case (budget > 1, budget > 2) of
-                            (True , True ) -> par3 (merged_act, act1, act2)
-                            (True , False) -> (\(a, (b, c)) -> (a, b, c)) <$> par2 (merged_act, (,) <$> act1 <*> act2)
-                            (False, False) -> do
-                                m  <- merged_act
-                                s1 <- act1
-                                s2 <- act2
-                                return (m, s1, s2)
-                            (False, True ) -> error "Not possible by transitivity of (>)"
-                        let sets = (fuse1 ++ fuse2, nfuse1 `S.union` nfuse2)
-                        quality <- eval eval_u sets
-                        return (mres, (quality, sets))
-                    {- START AI-GENERATED CODE -}
-                    xs -> do
-                        let n = length xs
-                            child_budget = budget / (2 * fromIntegral n)
-                            merge_us = split n merge_u'
-                            eval_us = split n eval_u2
-                            acts = [ go child_budget rng2 with_split mu eu x | (mu, eu, x) <- zip3 merge_us eval_us xs ]
-                        (mres, split_results) <-
-                            if budget > 1
-                                then par2 (merged_act, parList acts)
-                                else (,) <$> merged_act <*> sequence acts
-                        let sets = ( concat [fs | (_, (fs, _)) <- split_results]
-                                   , S.unions [ns | (_, (_, ns)) <- split_results] )
-                        quality <- eval eval_u sets
-                        return (mres, (quality, sets))
-                    {- END AI-GENERATED CODE -}
-                return $ if split_quality > merged_quality
-                    then (split_quality, split_sets)
-                    else (merged_quality, merged_sets)
+                let eval_u_merged = eval_u
+                let eval_u_split  = Unique.next eval_u_merged
+                let eval_u_rec    = Unique.next eval_u_split
+
+                let budgets
+                        =  split merged_c_count (if split_c_count  > 0 then budget/2 else budget)
+                        ++ split split_c_count  (if merged_c_count > 0 then budget/2 else budget)
+
+                let acts = zipWith ($) (uncurry go <$> branches) budgets $: rng' $: merge_u' $: eval_u_rec
+
+                results <- if ceiling budget >= branch_count
+                    then parList acts
+                    else sequence acts
+                let (merged_results, split_results) = splitAt merged_c_count results
+
+                merged_scored <- scoreOutcome eval_u_merged merged_fnf merged_results
+                split_scored  <- scoreOutcome eval_u_split  split_fnf  split_results
+
+                return $ case fst split_scored `compare` fst merged_scored of
+                    GT -> split_scored
+                    LT -> merged_scored
+                    EQ -> if length (fst $ snd merged_scored) < length (fst $ snd split_scored)
+                        then merged_scored
+                        else split_scored
+
+        scoreOutcome :: Unique -> FuseNoFuses v -> [(q, FuseNoFuses v)] -> m (q, FuseNoFuses v)
+        scoreOutcome eu base []  = (,base) <$> eval eu base
+        scoreOutcome _  _    [r] = return r
+        scoreOutcome eu base rs  = (,sets) <$> eval eu sets
+            where
+                sets = combineSets base (map snd rs)
+
+        combineSets :: FuseNoFuses v -> [FuseNoFuses v] -> FuseNoFuses v
+        combineSets (base_fs, _) sets =
+            ( concatMap (stripBase . fst) sets ++ base_fs
+            , S.unions $ snd <$> sets
+            )
+            where
+                base_len = length base_fs
+                stripBase fs = take (length fs - base_len) fs
 
         edge_policy = edge_policy_mincut
 
+        fuse_into_all :: Bool
+        fuse_into_all = True
 
         {- START AI-GENERATED CODE -}
 
