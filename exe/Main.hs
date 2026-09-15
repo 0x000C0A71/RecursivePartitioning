@@ -6,7 +6,6 @@
 -- TODO: allow for different droput policies
 -- TODO: implement bridge and neck policy correctly
 -- TODO: replace ai-generated code with human-generated code
--- TODO: compare optimal FNF to baseline in terms of quality
 
 module Main where
 
@@ -61,8 +60,7 @@ main = do
 
     config <- makeConfigAbsolute $ parseArgs my_args
 
-    fnf <- runOn config hlo_opt hlo_opt_args
-    print fnf
+    runOn config hlo_opt hlo_opt_args
 
 
 data LogMsg
@@ -72,7 +70,7 @@ data LogMsg
     deriving (Show)
 
 
-runOn :: Config -> FilePath -> [String] -> IO (Either Int (FuseNoFuses Reg))
+runOn :: Config -> FilePath -> [String] -> IO ()
 runOn config hlo_opt hlo_opt_args = do
     createDirectoryIfMissing True opt_logs
 
@@ -93,12 +91,13 @@ runOn config hlo_opt hlo_opt_args = do
     putStrLn $ "Working with " ++ show num_edges' ++ " edges"
 
     let !total_eval_count =
-            let compute = recPart fuse_into_all thread_budget rng_gen merge eval_eval_c graph'
+            let compute  = recPart fuse_into_all thread_budget rng_gen merge eval_eval_c graph'
                 (_, res) = runCounterM compute
             in res
 
     if configOnlyCountEvals config
-        then return $ Left total_eval_count
+        then do
+            putStrLn $ "Number of evaluations: " ++ show total_eval_count
         else do
             eval_counter <- newTVarIO 0
             log_channel  <- newChan
@@ -106,12 +105,27 @@ runOn config hlo_opt hlo_opt_args = do
             let compute = recPart fuse_into_all thread_budget rng_gen merge (eval eval_counter base_env log_channel compname) graph'
 
             start_time <- getCurrentTime
-            withAsync (log_thread log_channel) $ \logger ->
+            (fnf, baseline, quality) <- withAsync (log_thread log_channel) $ \logger ->
                 withAsync (update_thread eval_counter total_eval_count start_time) $ \_ -> do
                     res <- compute
+
+                    let unique  = newUnique
+                    let unique' = next unique
+
+                    baseline     <- eval eval_counter base_env log_channel compname unique  emptyFnf
+                    this_quality <- eval eval_counter base_env log_channel compname unique' res
+
                     writeChan log_channel LogEnd
                     wait logger
-                    return $ Right res
+                    return (res, baseline, this_quality)
+            putStrLn $ "Quality " ++ show quality ++ " (" ++ show baseline ++ "): " ++ show fnf
+
+            let final_output = workdir ++ "/optimal-fnf"
+            writeFile final_output $ serializeFNF compname $ first reverse fnf
+
+            putStrLn $ "Final output in " ++ final_output
+
+
     where
         -- extracting config variables
         thread_budget = configThreadBudget config
@@ -148,7 +162,7 @@ runOn config hlo_opt hlo_opt_args = do
         eval eval_counter base_env log_channel cname unique fnf = do
 
             let instr_file = workdir ++ "/fnf" ++ show unique
-            let out_file = workdir ++ "/force_out" ++ show unique
+            let out_file   = workdir ++ "/force_out" ++ show unique
             writeFile instr_file $ serializeFNF cname $ first reverse  fnf
 
             call_opt ("eval-" ++ show unique)
@@ -159,7 +173,7 @@ runOn config hlo_opt hlo_opt_args = do
 
             doesFileExist out_file >>= \case
                 True -> do
-                    ev <-parseEval <$> readFile out_file
+                    ev <- parseEval <$> readFile out_file
                     let quality = 1.0 / evalExecNanos ev
 
                     removeFile instr_file

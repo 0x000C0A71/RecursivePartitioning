@@ -95,7 +95,7 @@ recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m)
 --{-# SPECIALIZE recPart @Reg @CounterM @Int #-}
 {-# SPECIALIZE recPart :: Bool -> Budget -> StdGen -> (Unique -> Reg -> Reg -> IO (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> IO Quality) -> G.Graph Reg -> IO (FuseNoFuses Reg) #-}
 {-# SPECIALIZE recPart :: Bool -> Budget -> StdGen -> (Unique -> Reg -> Reg -> CounterM (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> CounterM Int) -> G.Graph Reg -> CounterM (FuseNoFuses Reg) #-}
-recPart fuse_into_all bud gen merge eval ggg = snd <$> go ([], S.empty) ggg bud gen newUnique newUnique
+recPart fuse_into_all bud gen merge eval ggg = snd <$> go emptyFnf ggg bud gen newUnique newUnique
     where
         go :: FuseNoFuses v -> G.Graph v -> Budget -> StdGen -> Unique -> Unique -> m (q, FuseNoFuses v)
         go !f !g !budget !rng !merge_u !eval_u = case edge_policy rng g of

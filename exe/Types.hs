@@ -2,7 +2,7 @@
 module Types
     ( Fusion
     , NoFusion
-    , FuseNoFuses
+    , FuseNoFuses, emptyFnf
     , MonadPar(..)
     , Budget
     , Quality
@@ -38,6 +38,9 @@ type Quality = Float
 type Fusion v = (v, v, v)
 type NoFusion v = (v, v)
 type FuseNoFuses v = ([Fusion v], S.Set (NoFusion v))
+
+emptyFnf :: FuseNoFuses v
+emptyFnf = ([], S.empty)
 
 
 class Monad m => MonadPar m where
