@@ -12,14 +12,13 @@ import qualified Unique
 import Unique (Unique, newUnique)
 import Types
 
-import System.Random  (StdGen, RandomGen, uniformR)
+import System.Random  (StdGen, RandomGen, uniformR, splitGen)
 import Data.List      (minimumBy)
 import Data.Ord       (comparing)
 import Data.Bifunctor (first, second)
 
-import qualified Data.Set      as S
-import qualified Data.Map      as M
-import qualified System.Random as R
+import qualified Data.Set as S
+import qualified Data.Map as M
 
 mergeMultiple
     :: forall v m . (Ord v, Monad m)
@@ -55,7 +54,7 @@ instance Splitable StdGen where
             go gens 1 gen = gen:gens
             go gens n gen = go (a:gens) (n-1) b
                 where
-                    (a, b) = R.split gen
+                    (a, b) = splitGen gen
 
 instance Splitable Unique where
     primSplit = Unique.split
