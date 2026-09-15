@@ -73,7 +73,8 @@ fns $: s = zipWith ($) fns $ split n s
 -- Searches for the optimal set of edges to fuse such that a
 -- quality metric returned by the passed eval function is maximized
 recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m)
-    => Budget -- ^ Parallel bifurcation budget
+    => Bool   -- ^ Fuse into all successors
+    -> Budget -- ^ Parallel bifurcation budget
     -> StdGen -- ^ Random number generator.
     -> (Unique -> v -> v -> m (v, Unique))
     -- ^ Merge function.
@@ -92,9 +93,9 @@ recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m)
     -> m (FuseNoFuses v)
 --{-# SPECIALIZE recPart @Reg @IO @Quality #-}
 --{-# SPECIALIZE recPart @Reg @CounterM @Int #-}
-{-# SPECIALIZE recPart ::  Budget -> StdGen -> (Unique -> Reg -> Reg -> IO (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> IO Quality) -> G.Graph Reg -> IO (FuseNoFuses Reg) #-}
-{-# SPECIALIZE recPart ::  Budget -> StdGen -> (Unique -> Reg -> Reg -> CounterM (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> CounterM Int) -> G.Graph Reg -> CounterM (FuseNoFuses Reg) #-}
-recPart bud gen merge eval ggg = snd <$> go ([], S.empty) ggg bud gen newUnique newUnique
+{-# SPECIALIZE recPart :: Bool -> Budget -> StdGen -> (Unique -> Reg -> Reg -> IO (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> IO Quality) -> G.Graph Reg -> IO (FuseNoFuses Reg) #-}
+{-# SPECIALIZE recPart :: Bool -> Budget -> StdGen -> (Unique -> Reg -> Reg -> CounterM (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> CounterM Int) -> G.Graph Reg -> CounterM (FuseNoFuses Reg) #-}
+recPart fuse_into_all bud gen merge eval ggg = snd <$> go ([], S.empty) ggg bud gen newUnique newUnique
     where
         go :: FuseNoFuses v -> G.Graph v -> Budget -> StdGen -> Unique -> Unique -> m (q, FuseNoFuses v)
         go !f !g !budget !rng !merge_u !eval_u = case edge_policy rng g of
@@ -161,9 +162,6 @@ recPart bud gen merge eval ggg = snd <$> go ([], S.empty) ggg bud gen newUnique 
                 stripBase fs = take (length fs - base_len) fs
 
         edge_policy = edge_policy_mincut
-
-        fuse_into_all :: Bool
-        fuse_into_all = True
 
         {- START AI-GENERATED CODE -}
 

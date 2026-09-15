@@ -5,7 +5,6 @@
 
 -- TODO: allow for different droput policies
 -- TODO: implement bridge and neck policy correctly
--- TODO: make "fuse all" configurable
 -- TODO: replace ai-generated code with human-generated code
 -- TODO: compare optimal FNF to baseline in terms of quality
 
@@ -94,7 +93,7 @@ runOn config hlo_opt hlo_opt_args = do
     putStrLn $ "Working with " ++ show num_edges' ++ " edges"
 
     let !total_eval_count =
-            let compute = recPart thread_budget rng_gen merge eval_eval_c graph'
+            let compute = recPart fuse_into_all thread_budget rng_gen merge eval_eval_c graph'
                 (_, res) = runCounterM compute
             in res
 
@@ -104,7 +103,7 @@ runOn config hlo_opt hlo_opt_args = do
             eval_counter <- newTVarIO 0
             log_channel  <- newChan
 
-            let compute = recPart thread_budget rng_gen merge (eval eval_counter base_env log_channel compname) graph'
+            let compute = recPart fuse_into_all thread_budget rng_gen merge (eval eval_counter base_env log_channel compname) graph'
 
             start_time <- getCurrentTime
             withAsync (log_thread log_channel) $ \logger ->
@@ -116,7 +115,8 @@ runOn config hlo_opt hlo_opt_args = do
     where
         -- extracting config variables
         thread_budget = configThreadBudget config
-        workdir       = configWorkingDir config
+        workdir       = configWorkingDir   config
+        fuse_into_all = configGraphFuseAll config
 
         update_thread :: TVar Int -> Int -> UTCTime -> IO ()
         update_thread counter total_evals start_time = go
