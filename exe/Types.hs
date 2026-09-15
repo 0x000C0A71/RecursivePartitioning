@@ -135,7 +135,10 @@ data Eval = Eval
 
 
 
-data DropoutPolicy = DropoutBeginning deriving (Show, Eq, Read)
+data DropoutPolicy
+    = DropoutBeginning
+    | DropoutCenter
+    deriving (Show, Eq, Read)
 
 data Config = Config
     { configDropout        :: Maybe Double

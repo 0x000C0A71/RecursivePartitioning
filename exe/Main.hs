@@ -26,7 +26,8 @@ import System.Exit                 (ExitCode(..))
 import System.IO                   (withFile, IOMode(WriteMode))
 import System.Process              (CreateProcess(..), StdStream(UseHandle, NoStream), createProcess_, waitForProcess, proc)
 import System.Random               (StdGen, mkStdGen)
-import Data.Foldable               (find)
+import Data.Foldable               (find, maximumBy)
+import Data.Ord (comparing)
 
 
 splitOn :: Eq a => a -> [a] -> ([a], [a])
@@ -37,19 +38,35 @@ splitOn k (x:xs) = if x == k
     where
         (ls, rs) = splitOn k xs
 
-
-dropout :: Ord v => Double -> G.Graph v -> G.Graph v
-dropout ratio g = case G.getSubgraphs dropped of
-    [x] -> x
-    []  -> error "Dropout failed: No graph left"
-    _   -> error "Dropout failed: We split the graph"
+{- START AI-GENERATED CODE -}
+-- | Reduce the graph to roughly @(1 - ratio)@ of its edges, choosing which
+-- edges to drop according to the given policy.
+dropout :: Ord v => DropoutPolicy -> Double -> G.Graph v -> G.Graph v
+dropout policy ratio g = largestPiece
+    $ foldl (flip ($)) g
+    $ uncurry G.removeEdge <$> elems
     where
-        edges = G.getEdgesTopological g
+        edges      = G.getEdgesTopological g
         edge_count = length edges
-        to_remove = round $ fromIntegral edge_count * ratio
-        elems = take to_remove edges
-        dropped = foldl (flip ($)) g $ uncurry G.removeEdge <$> elems
+        to_remove  = round $ fromIntegral edge_count * ratio
+        elems = case policy of
+            -- Drop the topologically first (input-facing) edges, keeping the
+            -- output end.
+            DropoutBeginning -> take to_remove edges
+            -- Keep a contiguous window in the middle. The sources and sinks are
+            -- the least representative part of a computation, so drop equally
+            -- from both ends rather than everything from one.
+            DropoutCenter ->
+                let from_head = to_remove `div` 2
+                    from_tail = to_remove - from_head
+                in take from_head edges ++ drop (edge_count - from_tail) edges
 
+        -- | Keep the largest connected piece of a possibly-disconnected graph.
+        largestPiece :: Ord v => G.Graph v -> G.Graph v
+        largestPiece g = case G.getSubgraphs g of
+            [] -> error "Dropout failed: No graph left"
+            xs -> maximumBy (comparing (length . G.getEdges)) xs
+{- END AI-GENERATED CODE -}
 
 main :: IO ()
 main = do
@@ -97,7 +114,7 @@ runOn config hlo_opt hlo_opt_args = do
     putStrLn $ "Read computation '" ++ compname ++ "' with " ++ show num_edges ++ " edges"
 
     let graph' = case configDropout config of
-            Just ratio -> dropout ratio graph
+            Just ratio -> dropout (configDropoutPolicy config) ratio graph
             Nothing    -> graph
 
     let num_edges' = length $ G.getEdges graph'
