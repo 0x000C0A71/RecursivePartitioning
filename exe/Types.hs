@@ -124,13 +124,8 @@ inc = add 1
 
 
 data Eval = Eval
-    { evalLeafInstrs   :: Int
-    , evalNumKernels   :: Int
-    , evalNumLaunches  :: Int
-    , evalBytesRead    :: Int
-    , evalBytesWritten :: Int
-    , evalFlops        :: Int
-    , evalExecNanos    :: Float
+    { evalValid     :: Bool
+    , evalExecNanos :: Float
     } deriving (Show, Eq)
 
 

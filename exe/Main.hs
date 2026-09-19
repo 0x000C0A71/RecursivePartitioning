@@ -214,7 +214,7 @@ runOn config hlo_opt hlo_opt_args = do
                 Right () -> doesFileExist out_file >>= \case
                     True -> do
                         ev <- parseEval <$> readFile out_file
-                        let quality = 1.0 / evalExecNanos ev
+                        let quality = if evalValid ev then 1.0 / evalExecNanos ev else 0
 
                         removeFile instr_file
                         removeFile out_file

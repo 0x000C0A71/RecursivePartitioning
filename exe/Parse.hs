@@ -55,17 +55,12 @@ parseGraphs
 
 parseEval :: String -> Eval
 parseEval contents = Eval
-    { evalLeafInstrs   = undefined --read leaf_instrs
-    , evalNumKernels   = undefined --read num_kernels
-    , evalNumLaunches  = undefined --read num_launches
-    , evalBytesRead    = undefined --read bytes_read
-    , evalBytesWritten = undefined --read bytes_written
-    , evalFlops        = undefined --read flops
-    , evalExecNanos    = read exec_nanos
+    { evalValid     = read valid
+    , evalExecNanos = read exec_nanos
     }
     where
         --[leaf_instrs, num_kernels, num_launches, bytes_read, bytes_written, flops, exec_nanos] = lines contents
-        [exec_nanos] = lines contents
+        [valid, exec_nanos] = lines contents
 
 
 parseArgs :: [String] -> Config
