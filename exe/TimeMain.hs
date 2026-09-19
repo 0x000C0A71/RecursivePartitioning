@@ -43,7 +43,7 @@ run run_hlo base_env module_path runs csv_path = do
                 go n = do
                     putStrLn $ "Run " ++ show n ++ " of " ++ show top
                     v <- act
-                    t <- if n <= top then go (n+1) else return []
+                    t <- if n < top then go (n+1) else return []
                     return $ v:t
 
         call_run :: IO Double
@@ -90,7 +90,7 @@ run run_hlo base_env module_path runs csv_path = do
                 box_vals = [lowest, lower_quart, median, upper_quart, highest]
 
                 arith_mean = sum values / count
-                geo_mean   = product values ** 1 / count
+                geo_mean   = product values ** (1 / count)
 
                 -- Indicies must be in order
                 extract :: [Int] -> [a] -> [a]
