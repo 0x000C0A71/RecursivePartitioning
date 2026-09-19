@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Main where
-    
+
 import Control.Monad      (replicateM)
 import Data.List          (sort)
 import System.Directory   (makeAbsolute, removeFile)
@@ -31,11 +31,21 @@ main = do
 
 run :: String -> Env -> FilePath -> Int -> FilePath -> IO ()
 run run_hlo base_env module_path runs csv_path = do
-    results <- replicateM runs call_run
+    results <- call_n_times runs call_run
     show_info results
     writeFile csv_path $ concatMap ((++ "\n") . show) results
     putStrLn $ "Written to " ++ show csv_path
     where
+        call_n_times :: forall a. Int -> IO a -> IO [a]
+        call_n_times top act = go 1
+            where
+                go :: Int -> IO [a]
+                go n = do
+                    putStrLn $ "Run " ++ show n ++ " of " ++ show top
+                    v <- act
+                    t <- if n <= top then go (n+1) else return []
+                    return $ v:t
+
         call_run :: IO Double
         call_run = do
             (_, _, _, process_handle) <- createProcess_ "call_run" create_process
