@@ -146,3 +146,23 @@ executable RecursivePartitioning
 
     -- Base language which the package is written in.
     default-language: Haskell2010
+
+executable TimeModule
+    import:           warnings
+    main-is:          TimeMain.hs
+    --other-modules:
+    --ghc-options:
+    hs-source-dirs:   exe
+    default-language: Haskell2010
+    build-depends:
+        base >=4.13.0.0,
+        RecursivePartitioning,
+        containers,
+        parallel,
+        mtl,
+        process,
+        directory,
+        async,
+        random,
+        stm,
+        time,
