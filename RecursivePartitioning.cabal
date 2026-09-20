@@ -138,6 +138,7 @@ executable RecursivePartitioning
         random,
         stm,
         time,
+        optparse-applicative,
 
     ghc-options: -threaded -rtsopts
 
@@ -166,3 +167,4 @@ executable TimeModule
         random,
         stm,
         time,
+        optparse-applicative,

@@ -1,16 +1,23 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ApplicativeDo #-}
 
 module Parse
     ( parseGraphs
     , serializeFNF
     , parseEval
     , parseArgs
+    , getConfig
     ) where
 
 import Types
 import qualified Data.Map as M
 import qualified Graph as G
 
+import qualified Options.Applicative as AP
+
+import Control.Applicative ((<**>))
+import Data.Maybe          (fromMaybe)
+import GHC.Conc            (numCapabilities)
 
 --(Reg, Reg, Reg)
 serializeFNF :: String -> FuseNoFuses Reg -> String
@@ -62,6 +69,100 @@ parseEval contents = Eval
         --[leaf_instrs, num_kernels, num_launches, bytes_read, bytes_written, flops, exec_nanos] = lines contents
         [valid, exec_nanos] = lines contents
 
+
+argParser :: AP.Parser Config
+argParser = do
+    dropout <- AP.optional $ AP.option AP.auto
+        (  AP.long "dropout"
+        <> AP.help "How much of the graph to drop. Omit to disable"
+        <> AP.metavar "FLOAT"
+        )
+    policy <- AP.option AP.auto
+        (  AP.long "dropout-policy"
+        <> AP.help ("How to remove part of the graph. One of: " ++ show [DropoutBeginning,DropoutCenter])
+        <> AP.showDefault
+        <> AP.value DropoutBeginning
+        <> AP.metavar "POLICY"
+        )
+    eta_interval :: Double <- AP.option AP.auto
+        (  AP.long "eta-interval-us"
+        <> AP.help "Seconds between eta printing"
+        <> AP.showDefault
+        <> AP.value 20
+        <> AP.metavar "SECONDS"
+        )
+    workdir <- AP.option AP.auto
+        (  AP.long "working-directory"
+        <> AP.help "Working directory to store temporary files"
+        <> AP.showDefault
+        <> AP.value "."
+        <> AP.metavar "PATH"
+        )
+    threading <- AP.option AP.auto
+        (  AP.long "thread-budget"
+        <> AP.help "Continous 'threading budget' to limit green thread production. Defaults to 4x runtime capabilities"
+        <> AP.showDefault
+        <> AP.value (fromIntegral $ numCapabilities * 4)
+        <> AP.metavar "FLOAT"
+        )
+    eval_rate <- AP.option AP.auto
+        (  AP.long "estimate-eval-rate"
+        <> AP.help "Eval rate (as reported by the ETAs) to estimate runtime in count-only mode"
+        <> AP.showDefault
+        <> AP.value 60
+        <> AP.metavar "FLOAT"
+        )
+    comp <- AP.optional $ AP.strOption
+        (  AP.long "computation"
+        <> AP.help "The computation to optimize. If ommited will assume module only has one"
+        <> AP.metavar "NAME"
+        )
+    count <- AP.switch
+        (  AP.long "count-only"
+        <> AP.short 'c'
+        <> AP.help "Perform no optimization, only count leaf evaluations"
+        )
+    log_hlo <- AP.switch
+        (  AP.long "log-hlo-opt"
+        <> AP.short 'l'
+        <> AP.help "Keep logs of the `hlo-opt` calls around. CAUTION this creates a LOT of data"
+        )
+    fuse_all <- AP.switch
+        (  AP.long "fuse-all-consumers"
+        <> AP.short 'a'
+        <> AP.help "Fuse producers into all consumers and perform no partial fusions"
+        )
+    hlo_path <- AP.strArgument
+        (  AP.help "Path to a .hlo module to optimize"
+        <> AP.metavar "HLO_PATH"
+        )
+    opt_args <- AP.optional $ AP.some $ AP.strArgument
+        (  AP.help "Additional arguments to pass to `hlo-opt`"
+        <> AP.metavar "HLO_OPT_ARGS"
+        )
+    return Config
+        { configDropout        = dropout
+        , configDropoutPolicy  = policy
+        , configEtaInterval    = round $ eta_interval * 1000000
+        , configWorkingDir     = workdir
+        , configThreadBudget   = threading
+        , configEvalRate       = eval_rate
+        , configCompName       = comp
+        , configOnlyCountEvals = count
+        , configHloOptLog      = log_hlo
+        , configGraphFuseAll   = fuse_all
+        , configHloPath        = hlo_path
+        , configHloOptArgs     = fromMaybe [] opt_args
+        }
+
+
+getConfig :: IO Config
+getConfig = AP.execParser opts
+    where
+        opts = AP.info (argParser <**> AP.helper)
+            (  AP.fullDesc
+            <> AP.progDesc "Optimize the operator fusion decisions of a passed hlo module"
+            )
 
 parseArgs :: [String] -> Config
 parseArgs = go Nothing

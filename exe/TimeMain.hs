@@ -1,18 +1,57 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ApplicativeDo #-}
 
 module Main where
 
-import Control.Monad      (replicateM)
-import Data.List          (sort)
-import System.Directory   (makeAbsolute, removeFile)
-import System.Environment (lookupEnv, getEnvironment, getArgs)
-import System.Exit        (ExitCode(ExitFailure, ExitSuccess))
-import System.Process     (StdStream (NoStream), createProcess_, waitForProcess, proc, CreateProcess (..))
+import qualified Options.Applicative as AP
+
+import Control.Applicative ((<**>))
+import Data.List           (sort)
+import System.Directory    (makeAbsolute, removeFile)
+import System.Environment  (lookupEnv, getEnvironment)
+import System.Exit         (ExitCode(ExitFailure, ExitSuccess))
+import System.Process      (StdStream (NoStream), createProcess_, waitForProcess, proc, CreateProcess (..))
 
 -- XLA_RPOF_FORCE_FILE=/RecursivePartitioning/workdir/optimal-fnf /xla/bazel-bin/xla/tools/run_hlo_module --platform=CUDA /hlos/small.hlo
 
 type Env = [(String, String)]
+
+parseArgs :: IO (FilePath, Int, FilePath, FilePath)
+parseArgs = AP.execParser opts
+    where
+        opts = AP.info (argParser <**> AP.helper)
+            (  AP.fullDesc
+            <> AP.progDesc "Run an optimized module to compare compimizations to baseline"
+            )
+
+        argParser :: AP.Parser (FilePath, Int, FilePath, FilePath)
+        argParser = do
+            module_path <- AP.strArgument
+                (  AP.help "Path to the hlo module file"
+                <> AP.metavar "MODULE"
+                )
+            fuses <- AP.strArgument
+                (  AP.help "Path to the optimized fuses file"
+                <> AP.metavar "FNF_FILE"
+                )
+            runs <- AP.option AP.auto
+                (  AP.long "runs"
+                <> AP.short 'r'
+                <> AP.help "Number of runs per version"
+                <> AP.showDefault
+                <> AP.value 50
+                <> AP.metavar "RUNS"
+                )
+            csv_path <- AP.option AP.auto
+                (  AP.long "output"
+                <> AP.short 'o'
+                <> AP.help "Path to put the results"
+                <> AP.showDefault
+                <> AP.value "results.csv"
+                <> AP.metavar "RESULTS"
+                )
+            return (module_path, runs, csv_path, fuses)
 
 main :: IO ()
 main = do
@@ -21,12 +60,11 @@ main = do
         Nothing -> return "hlo_opt"
 
     base_env <- getEnvironment
-    [module_path', runs', csv_path', fuses'] <- getArgs
+    (module_path', runs, csv_path', fuses') <- parseArgs
 
     module_path <- makeAbsolute module_path'
     csv_path    <- makeAbsolute csv_path'
     fuses       <- makeAbsolute fuses'
-    let runs = read runs'
     
     run run_hlo base_env module_path runs csv_path fuses
 

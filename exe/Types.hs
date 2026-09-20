@@ -147,6 +147,7 @@ data Config = Config
     , configThreadBudget   :: Double
     , configEvalRate       :: Double
     , configCompName       :: Maybe String
+    , configHloOptArgs     :: [String]
     } deriving (Show, Eq)
 
 defaultConfig :: Config
@@ -162,6 +163,7 @@ defaultConfig = Config
     , configThreadBudget   = fromIntegral $ numCapabilities * 4
     , configEvalRate       = 60
     , configCompName       = Nothing
+    , configHloOptArgs     = []
     }
 
 makeConfigAbsolute :: Config -> IO Config

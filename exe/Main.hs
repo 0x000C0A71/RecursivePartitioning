@@ -75,11 +75,9 @@ main = do
         Just p -> p
         Nothing -> "hlo_opt"
 
-    (my_args, hlo_opt_args) <- splitOn "--" <$> getArgs
+    config <- getConfig >>= makeConfigAbsolute
 
-    config <- makeConfigAbsolute $ parseArgs my_args
-
-    runOn config hlo_opt hlo_opt_args
+    runOn config hlo_opt
 
 
 data LogMsg
@@ -89,8 +87,8 @@ data LogMsg
     deriving (Show)
 
 
-runOn :: Config -> FilePath -> [String] -> IO ()
-runOn config hlo_opt hlo_opt_args = do
+runOn :: Config -> FilePath -> IO ()
+runOn config hlo_opt = do
     createDirectoryIfMissing True opt_logs
 
     base_env <- getEnvironment
@@ -264,7 +262,7 @@ runOn config hlo_opt hlo_opt_args = do
                         error $ "opt failed with exit code " ++ show e ++ ". Logs at " ++ opt_out ++ " & " ++ opt_err
             where
                 create_process :: StdStream -> StdStream -> CreateProcess
-                create_process opt_out_hdl opt_err_hdl = (proc hlo_opt $ hlo_opt_args ++ [configHloPath config])
+                create_process opt_out_hdl opt_err_hdl = (proc hlo_opt $ configHloOptArgs config ++ [configHloPath config])
                     { std_out = opt_out_hdl
                     , std_err = opt_err_hdl
                     , env     = Just opt_env
