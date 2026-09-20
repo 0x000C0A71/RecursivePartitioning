@@ -128,10 +128,16 @@ runOn config hlo_opt hlo_opt_args = do
 
     if configOnlyCountEvals config
         then do
+            let ec_double :: Double = fromIntegral total_eval_count
+            let equ_edges = logBase 2 ec_double
+            let base = ec_double ** (1 / fromIntegral num_edges')
             let eval_rate = configEvalRate config
             let time_per_eval = secondsToNominalDiffTime $ fromRational $ toRational $ 1 / eval_rate
             let total_time = time_per_eval * fromIntegral total_eval_count
             putStrLn $ "Number of evaluations: " ++ show total_eval_count
+            putStrLn $ "Equivalent to:"
+            putStrLn $ " - 2^" ++ show equ_edges
+            putStrLn $ " - " ++ show base ++ "^" ++ show num_edges'
             putStrLn $ "Time to compute: " ++ humanReadableDuration total_time ++ " (assuming eval rate of " ++ show eval_rate ++ "e/s)"
         else do
             eval_counter <- newTVarIO 0
