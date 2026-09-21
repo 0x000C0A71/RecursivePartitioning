@@ -189,6 +189,8 @@ runOn config hlo_opt = do
                     , ""
                     , index_line "eval count" eval_count
                     , index_line "eval rate" eval_rate
+                    , ""
+                    , index_line "full config" config
                     ]
 
             writeFile (outdir ++ "/optimal.force") $ serializeFNF compname $ first reverse fnf
