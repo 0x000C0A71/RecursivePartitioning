@@ -90,7 +90,7 @@ argParser = do
         <> AP.metavar "POLICY"
         )
     eta_interval :: Double <- AP.option AP.auto
-        (  AP.long "eta-interval-us"
+        (  AP.long "eta-interval"
         <> AP.help "Seconds between eta printing"
         <> AP.showDefault
         <> AP.value 20
