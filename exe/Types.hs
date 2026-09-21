@@ -172,7 +172,9 @@ makeConfigAbsolute :: Config -> IO Config
 makeConfigAbsolute cfg = do
     hlo_path <- makeAbsolute $ configHloPath cfg
     work_dir <- makeAbsolute $ configWorkingDir cfg
+    outs_dir <- makeAbsolute $ configOutputFrags cfg
     return cfg
-        { configHloPath    = hlo_path
-        , configWorkingDir = work_dir
+        { configHloPath     = hlo_path
+        , configWorkingDir  = work_dir
+        , configOutputFrags = outs_dir
         }
