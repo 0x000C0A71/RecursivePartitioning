@@ -153,7 +153,7 @@ data Config = Config
 defaultConfig :: Config
 defaultConfig = Config
     { configDropout        = Nothing
-    , configDropoutPolicy  = DropoutBeginning
+    , configDropoutPolicy  = DropoutCenter
     , configOnlyCountEvals = False
     , configHloOptLog      = False
     , configEtaInterval    = 20000000

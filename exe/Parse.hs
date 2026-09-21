@@ -87,7 +87,7 @@ argParser = do
         <> AP.short 'p'
         <> AP.help ("How to remove part of the graph. One of: " ++ show [DropoutBeginning,DropoutCenter])
         <> AP.showDefault
-        <> AP.value DropoutBeginning
+        <> AP.value DropoutCenter
         <> AP.metavar "POLICY"
         )
     eta_interval :: Double <- AP.option AP.auto
