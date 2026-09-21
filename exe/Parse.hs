@@ -79,11 +79,13 @@ argParser :: AP.Parser Config
 argParser = do
     dropout <- AP.optional $ AP.option AP.auto
         (  AP.long "dropout"
+        <> AP.short 'd'
         <> AP.help "How much of the graph to drop. Omit to disable"
         <> AP.metavar "FLOAT"
         )
     policy <- AP.option AP.auto
         (  AP.long "dropout-policy"
+        <> AP.short 'p'
         <> AP.help ("How to remove part of the graph. One of: " ++ show [DropoutBeginning,DropoutCenter])
         <> AP.showDefault
         <> AP.value DropoutBeginning
@@ -91,6 +93,7 @@ argParser = do
         )
     eta_interval :: Double <- AP.option AP.auto
         (  AP.long "eta-interval"
+        <> AP.short 'e'
         <> AP.help "Seconds between eta printing"
         <> AP.showDefault
         <> AP.value 20
@@ -98,6 +101,7 @@ argParser = do
         )
     workdir <- AP.option AP.auto
         (  AP.long "working-directory"
+        <> AP.short 'w'
         <> AP.help "Working directory to store temporary files"
         <> AP.showDefault
         <> AP.value "."
@@ -105,6 +109,7 @@ argParser = do
         )
     threading <- AP.option AP.auto
         (  AP.long "thread-budget"
+        <> AP.short 'b'
         <> AP.help "Continous 'threading budget' to limit green thread production. Defaults to 4x runtime capabilities"
         <> AP.showDefault
         <> AP.value (fromIntegral $ numCapabilities * 4)
@@ -112,6 +117,7 @@ argParser = do
         )
     eval_rate <- AP.option AP.auto
         (  AP.long "estimate-eval-rate"
+        <> AP.short 'r'
         <> AP.help "Eval rate (as reported by the ETAs) to estimate runtime in count-only mode"
         <> AP.showDefault
         <> AP.value 60
@@ -119,12 +125,13 @@ argParser = do
         )
     comp <- AP.optional $ AP.strOption
         (  AP.long "computation"
+        <> AP.short 'c'
         <> AP.help "The computation to optimize. If ommited will assume module only has one"
         <> AP.metavar "NAME"
         )
     count <- AP.switch
         (  AP.long "count-only"
-        <> AP.short 'c'
+        <> AP.short 'n'
         <> AP.help "Perform no optimization, only count leaf evaluations"
         )
     log_hlo <- AP.switch
