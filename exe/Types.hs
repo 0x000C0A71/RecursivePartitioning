@@ -148,6 +148,7 @@ data Config = Config
     , configEvalRate       :: Double
     , configCompName       :: Maybe String
     , configHloOptArgs     :: [String]
+    , configOutputFrags    :: FilePath
     } deriving (Show, Eq)
 
 defaultConfig :: Config
@@ -164,6 +165,7 @@ defaultConfig = Config
     , configEvalRate       = 60
     , configCompName       = Nothing
     , configHloOptArgs     = []
+    , configOutputFrags    = "."
     }
 
 makeConfigAbsolute :: Config -> IO Config

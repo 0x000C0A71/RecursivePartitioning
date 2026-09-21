@@ -106,6 +106,14 @@ argParser = do
         <> AP.value "."
         <> AP.metavar "PATH"
         )
+    outdir <- AP.option AP.auto
+        (  AP.long "output"
+        <> AP.short 'o'
+        <> AP.help "Directory to put the output fragments"
+        <> AP.showDefault
+        <> AP.value "."
+        <> AP.metavar "PATH"
+        )
     threading <- AP.option AP.auto
         (  AP.long "thread-budget"
         <> AP.short 'b'
@@ -164,6 +172,7 @@ argParser = do
         , configGraphFuseAll   = fuse_all
         , configHloPath        = hlo_path
         , configHloOptArgs     = fromMaybe [] opt_args
+        , configOutputFrags    = outdir
         }
 
 

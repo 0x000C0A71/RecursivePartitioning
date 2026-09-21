@@ -158,19 +158,48 @@ runOn config hlo_opt = do
                     writeChan log_channel LogEnd
                     wait logger
                     return (res, baseline, this_quality)
-            putStrLn $ "Quality " ++ show quality ++ " (" ++ show baseline ++ "): " ++ show fnf
-
-            let final_output = workdir ++ "/optimal-fnf"
-            writeFile final_output $ serializeFNF compname $ first reverse fnf
-
-            putStrLn $ "Final output in " ++ final_output
-
-
+            time_now <- getCurrentTime
+            final_evals <- readTVarIO eval_counter
+            let duration = time_now `diffUTCTime` start_time
+            let eval_rate = fromIntegral final_evals / nominalDiffTimeToSeconds duration
+            report final_evals (fromRational $ toRational eval_rate) quality baseline fnf compname
     where
         -- extracting config variables
         thread_budget = configThreadBudget config
         workdir       = configWorkingDir   config
         fuse_into_all = configGraphFuseAll config
+
+        report :: Int -> Double -> Quality -> Quality -> FuseNoFuses Reg -> String -> IO ()
+        report eval_count eval_rate quality baseline fnf compname = do
+            putStrLn $ "Quality " ++ show quality ++ " (" ++ show baseline ++ "): " ++ show fnf
+            putStrLn $ "Ran " ++ show eval_count ++ " evals with " ++ show eval_rate ++ "e/s"
+
+            let stats = unlines
+                    [ index_line "improvement" $ not (null $ fst fnf)
+                    , index_line "quality ours" quality
+                    , index_line "quality baseline" baseline
+                    , ""
+                    , index_line "dropout" dropout_r
+                    , index_line "hlo module" source_module
+                    , ""
+                    , index_line "computation" compname
+                    , index_line "forced fusions" $ reverse $ fst fnf
+                    , ""
+                    , index_line "eval count" eval_count
+                    , index_line "eval rate" eval_rate
+                    ]
+
+            writeFile (outdir ++ "/optimal.force") $ serializeFNF compname $ first reverse fnf
+            writeFile (outdir ++ "/index") stats
+
+            putStrLn $ "Output fragments in " ++ outdir
+            where
+                source_module = configHloPath config
+                dropout_r     = configDropout config
+                outdir        = configOutputFrags config
+
+                index_line :: Show a => String -> a -> String
+                index_line name a = name ++ ": " ++ show a
 
         update_thread :: TVar Int -> Int -> UTCTime -> IO ()
         update_thread counter total_evals start_time = go

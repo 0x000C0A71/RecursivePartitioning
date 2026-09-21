@@ -130,9 +130,10 @@ recPart fuse_into_all bud gen merge eval root_graph = case G.getSubgraphs root_g
                 let eval_u_split  = Unique.next eval_u_merged
                 let eval_u_rec    = Unique.next eval_u_split
 
-                let budgets
-                        =  split merged_c_count (if split_c_count  > 0 then budget/2 else budget)
-                        ++ split split_c_count  (if merged_c_count > 0 then budget/2 else budget)
+                let budgets =
+                        let eval_estimates  = (exponential_base^) . length . G.getEdges <$> merged_components ++ split_components
+                            eval_estimate_t = sum eval_estimates
+                        in (*budget) . (/eval_estimate_t) <$> eval_estimates
 
                 let acts = zipWith ($) (uncurry go <$> branches) budgets $: rng' $: merge_u' $: eval_u_rec
 
@@ -150,6 +151,10 @@ recPart fuse_into_all bud gen merge eval root_graph = case G.getSubgraphs root_g
                     EQ -> if length (fst $ snd merged_scored) < length (fst $ snd split_scored)
                         then merged_scored
                         else split_scored
+
+        -- | Tunable parameter to control how budget is distributed among recursive calls
+        exponential_base :: Double
+        exponential_base = 1.5
 
         scoreOutcome :: Unique -> FuseNoFuses v -> [(q, FuseNoFuses v)] -> m (q, FuseNoFuses v)
         scoreOutcome eu base []  = (,base) <$> eval eu base
