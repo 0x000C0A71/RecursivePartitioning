@@ -98,7 +98,7 @@ argParser = do
         <> AP.value 20
         <> AP.metavar "SECONDS"
         )
-    workdir <- AP.option AP.auto
+    workdir <- AP.strOption
         (  AP.long "working-directory"
         <> AP.short 'w'
         <> AP.help "Working directory to store temporary files"
@@ -106,7 +106,7 @@ argParser = do
         <> AP.value "."
         <> AP.metavar "PATH"
         )
-    outdir <- AP.option AP.auto
+    outdir <- AP.strOption
         (  AP.long "output"
         <> AP.short 'o'
         <> AP.help "Directory to put the output fragments"
