@@ -121,7 +121,8 @@ runOn config hlo_opt = do
     putStrLn $ "Working with " ++ show num_edges' ++ " edges"
 
     let !total_eval_count =
-            let compute  = recPart fuse_into_all thread_budget rng_gen merge eval_eval_c graph'
+            --              Okay rough estimate  vvv  Enough to get the actual number
+            let compute  = recPart fuse_into_all 1.5 thread_budget rng_gen merge eval_eval_c graph'
                 (_, res) = runCounterM compute
             in res
     let ec_double :: Double = fromIntegral total_eval_count
@@ -142,7 +143,7 @@ runOn config hlo_opt = do
             eval_counter <- newTVarIO 0
             log_channel  <- newChan
 
-            let compute = recPart fuse_into_all thread_budget rng_gen merge (eval eval_counter base_env log_channel compname) graph'
+            let compute = recPart fuse_into_all base thread_budget rng_gen merge (eval eval_counter base_env log_channel compname) graph'
 
             start_time <- getCurrentTime
             (fnf, baseline, quality) <- withAsync (log_thread log_channel) $ \logger ->

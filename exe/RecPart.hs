@@ -74,6 +74,7 @@ fns $: s = zipWith ($) fns $ split n s
 -- quality metric returned by the passed eval function is maximized
 recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m)
     => Bool   -- ^ Fuse into all successors
+    -> Double -- ^ Exponential base to model subgraph computation cost
     -> Budget -- ^ Parallel bifurcation budget
     -> StdGen -- ^ Random number generator.
     -> (Unique -> v -> v -> m (v, Unique))
@@ -93,9 +94,9 @@ recPart :: forall v m q . (Ord v, Ord q, Monad m, MonadPar m)
     -> m (FuseNoFuses v)
 --{-# SPECIALIZE recPart @Reg @IO @Quality #-}
 --{-# SPECIALIZE recPart @Reg @CounterM @Int #-}
-{-# SPECIALIZE recPart :: Bool -> Budget -> StdGen -> (Unique -> Reg -> Reg -> IO (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> IO Quality) -> G.Graph Reg -> IO (FuseNoFuses Reg) #-}
-{-# SPECIALIZE recPart :: Bool -> Budget -> StdGen -> (Unique -> Reg -> Reg -> CounterM (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> CounterM Int) -> G.Graph Reg -> CounterM (FuseNoFuses Reg) #-}
-recPart fuse_into_all bud gen merge eval root_graph = case G.getSubgraphs root_graph of
+{-# SPECIALIZE recPart :: Bool -> Double -> Budget -> StdGen -> (Unique -> Reg -> Reg -> IO (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> IO Quality) -> G.Graph Reg -> IO (FuseNoFuses Reg) #-}
+{-# SPECIALIZE recPart :: Bool -> Double -> Budget -> StdGen -> (Unique -> Reg -> Reg -> CounterM (Reg, Unique)) -> (Unique -> FuseNoFuses Reg -> CounterM Int) -> G.Graph Reg -> CounterM (FuseNoFuses Reg) #-}
+recPart fuse_into_all exponential_base bud gen merge eval root_graph = case G.getSubgraphs root_graph of
         []  -> error "No graph?"
         [g] -> go_root g
         gs  -> combineSets emptyFnf <$> mapM go_root gs
@@ -151,10 +152,6 @@ recPart fuse_into_all bud gen merge eval root_graph = case G.getSubgraphs root_g
                     EQ -> if length (fst $ snd merged_scored) < length (fst $ snd split_scored)
                         then merged_scored
                         else split_scored
-
-        -- | Tunable parameter to control how budget is distributed among recursive calls
-        exponential_base :: Double
-        exponential_base = 1.5
 
         scoreOutcome :: Unique -> FuseNoFuses v -> [(q, FuseNoFuses v)] -> m (q, FuseNoFuses v)
         scoreOutcome eu base []  = (,base) <$> eval eu base
