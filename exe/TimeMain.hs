@@ -43,7 +43,7 @@ parseArgs = AP.execParser opts
                 <> AP.value 50
                 <> AP.metavar "RUNS"
                 )
-            csv_path <- AP.option AP.auto
+            csv_path <- AP.strOption
                 (  AP.long "output"
                 <> AP.short 'o'
                 <> AP.help "Path to put the results"
