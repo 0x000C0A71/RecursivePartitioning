@@ -124,12 +124,12 @@ runOn config hlo_opt = do
             let compute  = recPart fuse_into_all thread_budget rng_gen merge eval_eval_c graph'
                 (_, res) = runCounterM compute
             in res
+    let ec_double :: Double = fromIntegral total_eval_count
+    let equ_edges = logBase 2 ec_double
+    let base = ec_double ** (1 / fromIntegral num_edges')
 
     if configOnlyCountEvals config
         then do
-            let ec_double :: Double = fromIntegral total_eval_count
-            let equ_edges = logBase 2 ec_double
-            let base = ec_double ** (1 / fromIntegral num_edges')
             let eval_rate = configEvalRate config
             let time_per_eval = secondsToNominalDiffTime $ fromRational $ toRational $ 1 / eval_rate
             let total_time = time_per_eval * fromIntegral total_eval_count
@@ -162,15 +162,15 @@ runOn config hlo_opt = do
             final_evals <- readTVarIO eval_counter
             let duration = time_now `diffUTCTime` start_time
             let eval_rate = fromIntegral final_evals / nominalDiffTimeToSeconds duration
-            report final_evals (fromRational $ toRational eval_rate) quality baseline fnf compname
+            report equ_edges base final_evals (fromRational $ toRational eval_rate) quality baseline fnf compname
     where
         -- extracting config variables
         thread_budget = configThreadBudget config
         workdir       = configWorkingDir   config
         fuse_into_all = configGraphFuseAll config
 
-        report :: Int -> Double -> Quality -> Quality -> FuseNoFuses Reg -> String -> IO ()
-        report eval_count eval_rate quality baseline fnf compname = do
+        report :: Double -> Double -> Int -> Double -> Quality -> Quality -> FuseNoFuses Reg -> String -> IO ()
+        report bits_to_search exp_base eval_count eval_rate quality baseline fnf compname = do
             createDirectoryIfMissing True outdir
 
             putStrLn $ "Quality " ++ show quality ++ " (" ++ show baseline ++ "): " ++ show fnf
@@ -189,6 +189,8 @@ runOn config hlo_opt = do
                     , ""
                     , index_line "eval count" eval_count
                     , index_line "eval rate" eval_rate
+                    , index_line "bits to search (2^x)" bits_to_search
+                    , index_line "exponential base (x^edges)" exp_base
                     , ""
                     , index_line "full config" config
                     ]
