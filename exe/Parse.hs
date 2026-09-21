@@ -16,6 +16,7 @@ import qualified Graph as G
 import qualified Options.Applicative as AP
 
 import Control.Applicative ((<**>))
+import Data.Bifunctor      (second, first)
 import Data.Maybe          (fromMaybe)
 import GHC.Conc            (numCapabilities)
 
@@ -42,9 +43,9 @@ serializeFNF cname (xs, _) = unlines $ do_one <$> xs
                     RenameReg s -> (s, 1)
 
 
-type ParserState = (String, Reg, M.Map String (G.Graph Reg))
+type ParserState = (String, Reg, M.Map String (Int, G.Graph Reg))
 
-parseGraphs :: String -> [(String, G.Graph Reg)]
+parseGraphs :: String -> [(String, (Int, G.Graph Reg))]
 parseGraphs
     = M.toList
     . (\(_,_,v) -> v)
@@ -52,11 +53,15 @@ parseGraphs
     where
         one_line :: String -> ParserState -> ParserState
         one_line [] k = k
-        one_line ('!':rest) (_   , _ , graphs) = (rest, undefined, M.insert rest G.empty graphs)
+        one_line ('!':rest) (_   , _ , graphs) = (rest, undefined, M.insert rest (0, G.empty) graphs)
         one_line ('%':rest) (comp, _ , graphs) = (comp, OrigReg $ head $ words rest, graphs)
-        one_line ('$':rest) (comp, to, graphs) = (comp, to, M.adjust (G.addEdge from to) comp graphs)
+        one_line ('$':rest) (comp, to, graphs) = (comp, to, M.adjust adj comp graphs)
             where
-                from = OrigReg $ head $ words rest
+                (from':fusible:_) = words rest
+                from = OrigReg from'
+
+                adj = if read fusible then second $ G.addEdge from to else first (+1)
+
         one_line (c:_) _ = error $ "Malformed graph dump: Line starting with " ++ show c
 
 

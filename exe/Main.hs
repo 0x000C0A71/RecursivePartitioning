@@ -99,7 +99,7 @@ runOn config hlo_opt = do
 
     let available_comp_text = "Available computations are: " ++ show (fst <$> comp_list)
 
-    let (compname, graph) = case configCompName config of
+    let (compname, (discarded, graph)) = case configCompName config of
             Just name -> case find ((name ==) . fst) comp_list of
                 Just x  -> x
                 Nothing -> error $ "No such computation! " ++ available_comp_text
@@ -111,6 +111,7 @@ runOn config hlo_opt = do
 
     let num_edges = length $ G.getEdges graph
     putStrLn $ "Read computation '" ++ compname ++ "' with " ++ show num_edges ++ " edges"
+    putStrLn $ show discarded ++ " edges in the soruce graph were marked as unfusible"
 
     let graph' = case configDropout config of
             Just ratio -> dropout (configDropoutPolicy config) ratio graph
