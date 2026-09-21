@@ -171,6 +171,8 @@ runOn config hlo_opt = do
 
         report :: Int -> Double -> Quality -> Quality -> FuseNoFuses Reg -> String -> IO ()
         report eval_count eval_rate quality baseline fnf compname = do
+            createDirectoryIfMissing True outdir
+
             putStrLn $ "Quality " ++ show quality ++ " (" ++ show baseline ++ "): " ++ show fnf
             putStrLn $ "Ran " ++ show eval_count ++ " evals with " ++ show eval_rate ++ "e/s"
 
