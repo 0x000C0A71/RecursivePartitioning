@@ -5,7 +5,6 @@ module Parse
     ( parseGraphs
     , serializeFNF
     , parseEval
-    , parseArgs
     , getConfig
     ) where
 
@@ -176,24 +175,3 @@ getConfig = AP.execParser opts
             <> AP.progDesc "Optimize the operator fusion decisions of a passed hlo module"
             )
 
-parseArgs :: [String] -> Config
-parseArgs = go Nothing
-    where
-        go :: Maybe FilePath -> [String] -> Config
-
-        go Nothing     [] = defaultConfig
-        go (Just path) [] = defaultConfig { configHloPath = path }
-
-        go fp ("--dropout"           :num     :rest) = (go fp rest) { configDropout        = Just $ read num }
-        go fp ("--dropout-policy"    :policy  :rest) = (go fp rest) { configDropoutPolicy  = read policy   }
-        go fp ("--eta-interval-us"   :interval:rest) = (go fp rest) { configEtaInterval    = read interval }
-        go fp ("--working-directory" :work_dir:rest) = (go fp rest) { configWorkingDir     = work_dir      }
-        go fp ("--thread-budget"     :budget  :rest) = (go fp rest) { configThreadBudget   = read budget   }
-        go fp ("--estimate-eval-rate":rate    :rest) = (go fp rest) { configEvalRate       = read rate     }
-        go fp ("--computation"       :compname:rest) = (go fp rest) { configCompName       = Just compname }
-        go fp ("--count-only"                 :rest) = (go fp rest) { configOnlyCountEvals = True          }
-        go fp ("--log-hlo-opt"                :rest) = (go fp rest) { configHloOptLog      = True          }
-        go fp ("--fuse-all-consumers"         :rest) = (go fp rest) { configGraphFuseAll   = True          }
-
-        go Nothing (path:rest) = go (Just path) rest
-        go (Just _) (second:_) = error $ "Cannot pass multiple hlo modules '" ++ second ++ "'"
