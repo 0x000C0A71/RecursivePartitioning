@@ -19,6 +19,7 @@ module Graph
 
     , minCut
     , bridges
+    , mostSuccessors
 
     , dbgShow
     , dbgVerify
@@ -208,6 +209,9 @@ getEdgesTopological g = getVerticesTopological g >>= get_incoming
     where
         get_incoming :: v -> [(v, v)]
         get_incoming k = (,k) <$> getPredecessors g k
+
+mostSuccessors :: forall v . Ord v => Graph v -> v
+mostSuccessors (Graph g) = fst $ maximumBy (comparing $ S.size . fst . snd) $ M.toList g
 
 -- TODO: At least add tests
 {- START AI-GENERTED CODE -}

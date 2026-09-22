@@ -169,7 +169,7 @@ recPart fuse_into_all exponential_base bud gen merge eval root_graph = case G.ge
                 base_len = length base_fs
                 stripBase fs = take (length fs - base_len) fs
 
-        edge_policy = edge_policy_mincut
+        edge_policy = edge_policy_paper
 
         {- START AI-GENERATED CODE -}
 
@@ -190,6 +190,16 @@ recPart fuse_into_all exponential_base bud gen merge eval root_graph = case G.ge
             neckEdge g = case G.minCut g of
                 (l, side) | l <= 3 && balancedCut g side -> crossingEdge g side
                 _ -> massEdge g
+
+        -- | Pick a bridge if one exists; else if there is a small (width <= 3)
+        -- and balanced min-cut, cut across it; else fall back to mass.
+        edge_policy_paper :: RandomGen g => g -> G.Graph v -> Maybe (v, v, g)
+        edge_policy_paper rng g = case G.getEdges g of
+            []    -> Nothing
+            _     -> let (x, y) = maybe (nnode, ssucc) id (bestBridge g) in Just (x, y, rng)
+          where
+            nnode = G.mostSuccessors g
+            ssucc = minimumBy (comparing $ length . G.getPredecessors g) $ G.getSuccessors g nnode
 
         -- Most balanced bridge (if any): the bridge whose removal splits the
         -- graph into two most-equal halves, measured by edge count.
