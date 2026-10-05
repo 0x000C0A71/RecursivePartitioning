@@ -163,15 +163,15 @@ runOn config hlo_opt = do
             final_evals <- readTVarIO eval_counter
             let duration = time_now `diffUTCTime` start_time
             let eval_rate = fromIntegral final_evals / nominalDiffTimeToSeconds duration
-            report equ_edges base final_evals (fromRational $ toRational eval_rate) quality baseline fnf compname
+            report num_edges num_edges' equ_edges base final_evals (fromRational $ toRational eval_rate) quality baseline fnf compname
     where
         -- extracting config variables
         thread_budget = configThreadBudget config
         workdir       = configWorkingDir   config
         fuse_into_all = configGraphFuseAll config
 
-        report :: Double -> Double -> Int -> Double -> Quality -> Quality -> FuseNoFuses Reg -> String -> IO ()
-        report bits_to_search exp_base eval_count eval_rate quality baseline fnf compname = do
+        report :: Int -> Int -> Double -> Double -> Int -> Double -> Quality -> Quality -> FuseNoFuses Reg -> String -> IO ()
+        report total_edges pdropout_edges bits_to_search exp_base eval_count eval_rate quality baseline fnf compname = do
             createDirectoryIfMissing True outdir
 
             putStrLn $ "Quality " ++ show quality ++ " (" ++ show baseline ++ "): " ++ show fnf
@@ -187,6 +187,9 @@ runOn config hlo_opt = do
                     , ""
                     , index_line "computation" compname
                     , index_line "forced fusions" $ reverse $ fst fnf
+                    , ""
+                    , index_line "total edges" total_edges
+                    , index_line "edges after dropout" pdropout_edges
                     , ""
                     , index_line "eval count" eval_count
                     , index_line "eval rate" eval_rate
