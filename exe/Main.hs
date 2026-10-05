@@ -182,6 +182,8 @@ runOn config hlo_opt = do
                     , index_line "quality ours" quality
                     , index_line "quality baseline" baseline
                     , ""
+                    , index_line "fuse into all" fuse_into_all
+                    , ""
                     , index_line "dropout" dropout_r
                     , index_line "hlo module" source_module
                     , ""
