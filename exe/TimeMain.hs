@@ -116,7 +116,7 @@ run run_hlo base_env module_path runs csv_path fuses = do
             return $ fromIntegral nanos / 1000000000
             where
                 create_process :: CreateProcess
-                create_process = (proc run_hlo ["--platform=CUDA", module_path])
+                create_process = (proc run_hlo ["--platform=CUDA", module_path, "--reference_platform="])
                     { std_out = NoStream
                     , std_err = NoStream
                     , env     = Just $ ("XLA_RPOF_RUNTIME_FILE", tmp_file) : environ
