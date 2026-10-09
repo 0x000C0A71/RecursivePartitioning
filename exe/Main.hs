@@ -114,9 +114,16 @@ runOn config hlo_opt = do
     putStrLn $ "Read computation '" ++ compname ++ "' with " ++ show num_edges ++ " edges"
     putStrLn $ show discarded ++ " edges in the soruce graph were marked as unfusible"
 
-    case configScalingPoints config of
-        Just n ->
-            let
+    let graph' = case configDropout config of
+            Just ratio -> dropout (configDropoutPolicy config) ratio graph
+            Nothing    -> graph
+
+    let num_edges' = length $ G.getEdges graph'
+    putStrLn $ "Working with " ++ show num_edges' ++ " edges"
+
+    if configScaling config
+        then let
+                n = round $ fromIntegral num_edges' * 1.5
                 Just start_ratio = configDropout config
 
                 do_one ratio = do
@@ -124,9 +131,9 @@ runOn config hlo_opt = do
                     putStrLn $ " Done: " ++ show edge_count ++ ": " ++ show res
                     return (edge_count, res)
                     where
-                        graph' = dropout (configDropoutPolicy config) ratio graph
-                        edge_count = length $ G.getEdges graph'
-                        compute  = recPart fuse_into_all 1.5 thread_budget rng_gen merge eval_eval_c graph'
+                        graph'' = dropout (configDropoutPolicy config) ratio graph
+                        edge_count = length $ G.getEdges graph''
+                        compute  = recPart fuse_into_all 1.5 thread_budget rng_gen merge eval_eval_c graph''
                         (_, res) = runCounterM compute
 
                 factor = (1 - start_ratio) / fromIntegral n
@@ -139,14 +146,7 @@ runOn config hlo_opt = do
                         strs' = "edges,evals" : strs
                 outdir        = configOutputFrags config
             in mapM do_one values >>= writeFile (outdir ++ "/scaling.csv") . encode
-        Nothing -> do
-            let graph' = case configDropout config of
-                    Just ratio -> dropout (configDropoutPolicy config) ratio graph
-                    Nothing    -> graph
-
-            let num_edges' = length $ G.getEdges graph'
-            putStrLn $ "Working with " ++ show num_edges' ++ " edges"
-
+        else do
             let !total_eval_count =
                     --              Okay rough estimate  vvv  Enough to get the actual number
                     let compute  = recPart fuse_into_all 1.5 thread_budget rng_gen merge eval_eval_c graph'
