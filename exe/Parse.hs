@@ -159,6 +159,12 @@ argParser = do
         (  AP.help "Additional arguments to pass to `hlo-opt`"
         <> AP.metavar "HLO_OPT_ARGS"
         )
+    scaling_points <- AP.optional $ AP.option AP.auto
+        (  AP.long "scale"
+        <> AP.short 's'
+        <> AP.help "Enable sweeping for scaling. Number of points to use."
+        <> AP.metavar "INT"
+        )
     return Config
         { configDropout        = dropout
         , configDropoutPolicy  = policy
@@ -173,6 +179,7 @@ argParser = do
         , configHloPath        = hlo_path
         , configHloOptArgs     = fromMaybe [] opt_args
         , configOutputFrags    = outdir
+        , configScalingPoints  = scaling_points
         }
 
 

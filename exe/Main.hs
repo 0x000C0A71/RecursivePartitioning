@@ -29,6 +29,7 @@ import System.Random               (StdGen, mkStdGen)
 import Data.Foldable               (find, maximumBy)
 import Data.Ord                    (comparing)
 import Control.Exception           (try, SomeException)
+import Data.List (nub)
 
 
 splitOn :: Eq a => a -> [a] -> ([a], [a])
@@ -113,57 +114,83 @@ runOn config hlo_opt = do
     putStrLn $ "Read computation '" ++ compname ++ "' with " ++ show num_edges ++ " edges"
     putStrLn $ show discarded ++ " edges in the soruce graph were marked as unfusible"
 
-    let graph' = case configDropout config of
-            Just ratio -> dropout (configDropoutPolicy config) ratio graph
-            Nothing    -> graph
+    case configScalingPoints config of
+        Just n ->
+            let
+                Just start_ratio = configDropout config
 
-    let num_edges' = length $ G.getEdges graph'
-    putStrLn $ "Working with " ++ show num_edges' ++ " edges"
+                do_one ratio = do
+                    putStr $ "Doing ratio " ++ show ratio
+                    putStrLn $ " Done: " ++ show edge_count ++ ": " ++ show res
+                    return (edge_count, res)
+                    where
+                        graph' = dropout (configDropoutPolicy config) ratio graph
+                        edge_count = length $ G.getEdges graph'
+                        compute  = recPart fuse_into_all 1.5 thread_budget rng_gen merge eval_eval_c graph'
+                        (_, res) = runCounterM compute
 
-    let !total_eval_count =
-            --              Okay rough estimate  vvv  Enough to get the actual number
-            let compute  = recPart fuse_into_all 1.5 thread_budget rng_gen merge eval_eval_c graph'
-                (_, res) = runCounterM compute
-            in res
-    let ec_double :: Double = fromIntegral total_eval_count
-    let equ_edges = logBase 2 ec_double
-    let base = ec_double ** (1 / fromIntegral num_edges')
+                factor = (1 - start_ratio) / fromIntegral n
+                values = (+start_ratio) . (*factor) . fromIntegral <$> [0..(n-1)]
 
-    if configOnlyCountEvals config
-        then do
-            let eval_rate = configEvalRate config
-            let time_per_eval = secondsToNominalDiffTime $ fromRational $ toRational $ 1 / eval_rate
-            let total_time = time_per_eval * fromIntegral total_eval_count
-            putStrLn $ "Number of evaluations: " ++ show total_eval_count
-            putStrLn $ "Equivalent to:"
-            putStrLn $ " - 2^" ++ show equ_edges
-            putStrLn $ " - " ++ show base ++ "^" ++ show num_edges'
-            putStrLn $ "Time to compute: " ++ humanReadableDuration total_time ++ " (assuming eval rate of " ++ show eval_rate ++ "e/s)"
-        else do
-            eval_counter <- newTVarIO 0
-            log_channel  <- newChan
+                encode lst = unlines strs'
+                    where
+                        de = nub lst
+                        strs = (\(a, b) -> show a ++ "," ++ show b) <$> de
+                        strs' = "edges,evals" : strs
+                outdir        = configOutputFrags config
+            in mapM do_one values >>= writeFile (outdir ++ "/scaling.csv") . encode
+        Nothing -> do
+            let graph' = case configDropout config of
+                    Just ratio -> dropout (configDropoutPolicy config) ratio graph
+                    Nothing    -> graph
 
-            let compute = recPart fuse_into_all base thread_budget rng_gen merge (eval eval_counter base_env log_channel compname) graph'
+            let num_edges' = length $ G.getEdges graph'
+            putStrLn $ "Working with " ++ show num_edges' ++ " edges"
 
-            start_time <- getCurrentTime
-            (fnf, baseline, quality) <- withAsync (log_thread log_channel) $ \logger ->
-                withAsync (update_thread eval_counter total_eval_count start_time) $ \_ -> do
-                    res <- compute
+            let !total_eval_count =
+                    --              Okay rough estimate  vvv  Enough to get the actual number
+                    let compute  = recPart fuse_into_all 1.5 thread_budget rng_gen merge eval_eval_c graph'
+                        (_, res) = runCounterM compute
+                    in res
+            let ec_double :: Double = fromIntegral total_eval_count
+            let equ_edges = logBase 2 ec_double
+            let base = ec_double ** (1 / fromIntegral num_edges')
 
-                    let unique  = newUnique
-                    let unique' = next unique
+            if configOnlyCountEvals config
+                then do
+                    let eval_rate = configEvalRate config
+                    let time_per_eval = secondsToNominalDiffTime $ fromRational $ toRational $ 1 / eval_rate
+                    let total_time = time_per_eval * fromIntegral total_eval_count
+                    putStrLn $ "Number of evaluations: " ++ show total_eval_count
+                    putStrLn $ "Equivalent to:"
+                    putStrLn $ " - 2^" ++ show equ_edges
+                    putStrLn $ " - " ++ show base ++ "^" ++ show num_edges'
+                    putStrLn $ "Time to compute: " ++ humanReadableDuration total_time ++ " (assuming eval rate of " ++ show eval_rate ++ "e/s)"
+                else do
+                    eval_counter <- newTVarIO 0
+                    log_channel  <- newChan
 
-                    baseline     <- eval eval_counter base_env log_channel compname unique  emptyFnf
-                    this_quality <- eval eval_counter base_env log_channel compname unique' res
+                    let compute = recPart fuse_into_all base thread_budget rng_gen merge (eval eval_counter base_env log_channel compname) graph'
 
-                    writeChan log_channel LogEnd
-                    wait logger
-                    return (res, baseline, this_quality)
-            time_now <- getCurrentTime
-            final_evals <- readTVarIO eval_counter
-            let duration = time_now `diffUTCTime` start_time
-            let eval_rate = fromIntegral final_evals / nominalDiffTimeToSeconds duration
-            report num_edges num_edges' equ_edges base final_evals (fromRational $ toRational eval_rate) quality baseline fnf compname
+                    start_time <- getCurrentTime
+                    (fnf, baseline, quality) <- withAsync (log_thread log_channel) $ \logger ->
+                        withAsync (update_thread eval_counter total_eval_count start_time) $ \_ -> do
+                            res <- compute
+
+                            let unique  = newUnique
+                            let unique' = next unique
+
+                            baseline     <- eval eval_counter base_env log_channel compname unique  emptyFnf
+                            this_quality <- eval eval_counter base_env log_channel compname unique' res
+
+                            writeChan log_channel LogEnd
+                            wait logger
+                            return (res, baseline, this_quality)
+                    time_now <- getCurrentTime
+                    final_evals <- readTVarIO eval_counter
+                    let duration = time_now `diffUTCTime` start_time
+                    let eval_rate = fromIntegral final_evals / nominalDiffTimeToSeconds duration
+                    report num_edges num_edges' equ_edges base final_evals (fromRational $ toRational eval_rate) quality baseline fnf compname
     where
         -- extracting config variables
         thread_budget = configThreadBudget config
