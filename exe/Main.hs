@@ -158,7 +158,10 @@ runOn config hlo_opt = do
                         strs = (\(a, b) -> show a ++ "," ++ show b) <$> de
                         strs' = "edges,evals" : strs
                 outdir        = configOutputFrags config
-            in mapM do_one values >>= writeFile (outdir ++ "/scaling.csv") . encode . catMaybes
+                filename = case configScalingK config of
+                    0 -> outdir ++ "/scaling.csv"
+                    n -> outdir ++ "/scaling-" ++ show n ++ ".csv"
+            in mapM do_one values >>= writeFile filename . encode . catMaybes
         else do
             let !total_eval_count =
                     --              Okay rough estimate  vvv  Enough to get the actual number
