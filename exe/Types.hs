@@ -150,6 +150,7 @@ data Config = Config
     , configHloOptArgs     :: [String]
     , configOutputFrags    :: FilePath
     , configScaling        :: Bool
+    , configScalingK       :: Int
     } deriving (Show, Eq)
 
 defaultConfig :: Config
@@ -168,6 +169,7 @@ defaultConfig = Config
     , configHloOptArgs     = []
     , configOutputFrags    = "."
     , configScaling        = False
+    , configScalingK       = 0
     }
 
 makeConfigAbsolute :: Config -> IO Config

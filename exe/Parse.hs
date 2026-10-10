@@ -164,6 +164,12 @@ argParser = do
         <> AP.short 's'
         <> AP.help "Sweep dropout to note scaling"
         )
+    scaling_k <- AP.option AP.auto
+        (  AP.long "scale-k"
+        <> AP.short 'k'
+        <> AP.value 0
+        <> AP.help "have dropout return the top kth largest cc"
+        )
     return Config
         { configDropout        = dropout
         , configDropoutPolicy  = policy
@@ -179,6 +185,7 @@ argParser = do
         , configHloOptArgs     = fromMaybe [] opt_args
         , configOutputFrags    = outdir
         , configScaling        = scaling
+        , configScalingK       = scaling_k
         }
 
 

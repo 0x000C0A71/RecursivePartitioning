@@ -27,9 +27,10 @@ import System.IO                   (withFile, IOMode(WriteMode))
 import System.Process              (CreateProcess(..), StdStream(UseHandle, NoStream), createProcess_, waitForProcess, proc)
 import System.Random               (StdGen, mkStdGen)
 import Data.Foldable               (find, maximumBy)
-import Data.Ord                    (comparing)
+import Data.Ord                    (comparing, Down (Down))
 import Control.Exception           (try, SomeException)
-import Data.List (nub)
+import Data.List (nub, sortBy)
+import Data.Maybe (fromMaybe, catMaybes)
 
 
 splitOn :: Eq a => a -> [a] -> ([a], [a])
@@ -43,8 +44,8 @@ splitOn k (x:xs) = if x == k
 {- START AI-GENERATED CODE -}
 -- | Reduce the graph to roughly @(1 - ratio)@ of its edges, choosing which
 -- edges to drop according to the given policy.
-dropout :: Ord v => DropoutPolicy -> Double -> G.Graph v -> G.Graph v
-dropout policy ratio g = largestPiece
+dropout' :: Ord v => (G.Graph v -> Maybe (G.Graph v)) -> DropoutPolicy -> Double -> G.Graph v -> Maybe (G.Graph v)
+dropout' largestPiece policy ratio g = largestPiece
     $ foldl (flip ($)) g
     $ uncurry G.removeEdge <$> elems
     where
@@ -63,11 +64,21 @@ dropout policy ratio g = largestPiece
                     from_tail = to_remove - from_head
                 in take from_head edges ++ drop (edge_count - from_tail) edges
 
-        -- | Keep the largest connected piece of a possibly-disconnected graph.
-        largestPiece :: Ord v => G.Graph v -> G.Graph v
+dropout :: Ord v => DropoutPolicy -> Double -> G.Graph v -> G.Graph v
+dropout policy ratio g = fromMaybe (error "Dropout failed: No graph left") $ dropout' largestPiece policy ratio g
+    where
+        largestPiece :: Ord v => G.Graph v -> Maybe (G.Graph v)
         largestPiece g = case G.getSubgraphs g of
-            [] -> error "Dropout failed: No graph left"
-            xs -> maximumBy (comparing (length . G.getEdges)) xs
+            [] -> Nothing
+            xs -> Just $ maximumBy (comparing (length . G.getEdges)) xs
+
+dropoutK :: Ord v => Int -> DropoutPolicy -> Double -> G.Graph v -> Maybe (G.Graph v)
+dropoutK k = dropout' largestPiece
+    where
+        largestPiece :: Ord v => G.Graph v -> Maybe (G.Graph v)
+        largestPiece g = case drop k $ sortBy (comparing (Down . length . G.getEdges)) $ G.getSubgraphs g of
+            []    -> Nothing
+            (x:_) -> Just x
 {- END AI-GENERATED CODE -}
 
 main :: IO ()
@@ -123,18 +134,20 @@ runOn config hlo_opt = do
 
     if configScaling config
         then let
-                n = round $ fromIntegral num_edges' * 1.5
                 Just start_ratio = configDropout config
+                n = ceiling $ fromIntegral num_edges * (1-start_ratio)
 
                 do_one ratio = do
                     putStr $ "Doing ratio " ++ show ratio
-                    putStrLn $ " Done: " ++ show edge_count ++ ": " ++ show res
-                    return (edge_count, res)
+                    putStrLn $ " Done: " ++ show result
+                    return result
                     where
-                        graph'' = dropout (configDropoutPolicy config) ratio graph
-                        edge_count = length $ G.getEdges graph''
-                        compute  = recPart fuse_into_all 1.5 thread_budget rng_gen merge eval_eval_c graph''
-                        (_, res) = runCounterM compute
+                        result = do
+                            graph'' <- dropoutK (configScalingK config) (configDropoutPolicy config) ratio graph
+                            let edge_count = length $ G.getEdges graph''
+                                compute  = recPart fuse_into_all 1.5 thread_budget rng_gen merge eval_eval_c graph''
+                                (_, res) = runCounterM compute
+                            return (edge_count, res)
 
                 factor = (1 - start_ratio) / fromIntegral n
                 values = (+start_ratio) . (*factor) . fromIntegral <$> [0..(n-1)]
@@ -145,7 +158,7 @@ runOn config hlo_opt = do
                         strs = (\(a, b) -> show a ++ "," ++ show b) <$> de
                         strs' = "edges,evals" : strs
                 outdir        = configOutputFrags config
-            in mapM do_one values >>= writeFile (outdir ++ "/scaling.csv") . encode
+            in mapM do_one values >>= writeFile (outdir ++ "/scaling.csv") . encode . catMaybes
         else do
             let !total_eval_count =
                     --              Okay rough estimate  vvv  Enough to get the actual number
