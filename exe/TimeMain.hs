@@ -77,7 +77,7 @@ main = do
     run run_hlo base_env module_path runs warmup csv_path fuses
 
 run :: String -> Env -> FilePath -> Int -> Int -> FilePath -> FilePath -> IO ()
-run run_hlo base_env module_path warmup runs csv_path fuses = do
+run run_hlo base_env module_path runs warmup csv_path fuses = do
     _ <- call_n_times warmup one
     results <- call_n_times runs one
     let (baseline, ours) = unzip results
