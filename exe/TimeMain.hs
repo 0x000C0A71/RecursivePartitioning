@@ -17,7 +17,7 @@ import System.Process      (StdStream (NoStream), createProcess_, waitForProcess
 
 type Env = [(String, String)]
 
-parseArgs :: IO (FilePath, Int, FilePath, FilePath)
+parseArgs :: IO (FilePath, Int, Int, FilePath, FilePath)
 parseArgs = AP.execParser opts
     where
         opts = AP.info (argParser <**> AP.helper)
@@ -25,7 +25,7 @@ parseArgs = AP.execParser opts
             <> AP.progDesc "Run an optimized module to compare compimizations to baseline"
             )
 
-        argParser :: AP.Parser (FilePath, Int, FilePath, FilePath)
+        argParser :: AP.Parser (FilePath, Int, Int, FilePath, FilePath)
         argParser = do
             module_path <- AP.strArgument
                 (  AP.help "Path to the hlo module file"
@@ -43,6 +43,14 @@ parseArgs = AP.execParser opts
                 <> AP.value 50
                 <> AP.metavar "RUNS"
                 )
+            warmup <- AP.option AP.auto
+                (  AP.long "warmup"
+                <> AP.short 'w'
+                <> AP.help "Number of warmup runs per version"
+                <> AP.showDefault
+                <> AP.value 10
+                <> AP.metavar "RUNS"
+                )
             csv_path <- AP.strOption
                 (  AP.long "output"
                 <> AP.short 'o'
@@ -51,7 +59,7 @@ parseArgs = AP.execParser opts
                 <> AP.value "results.csv"
                 <> AP.metavar "RESULTS"
                 )
-            return (module_path, runs, csv_path, fuses)
+            return (module_path, runs, warmup, csv_path, fuses)
 
 main :: IO ()
 main = do
@@ -60,16 +68,17 @@ main = do
         Nothing -> return "hlo_opt"
 
     base_env <- getEnvironment
-    (module_path', runs, csv_path', fuses') <- parseArgs
+    (module_path', runs, warmup, csv_path', fuses') <- parseArgs
 
     module_path <- makeAbsolute module_path'
     csv_path    <- makeAbsolute csv_path'
     fuses       <- makeAbsolute fuses'
     
-    run run_hlo base_env module_path runs csv_path fuses
+    run run_hlo base_env module_path runs warmup csv_path fuses
 
-run :: String -> Env -> FilePath -> Int -> FilePath -> FilePath -> IO ()
-run run_hlo base_env module_path runs csv_path fuses = do
+run :: String -> Env -> FilePath -> Int -> Int -> FilePath -> FilePath -> IO ()
+run run_hlo base_env module_path warmup runs csv_path fuses = do
+    _ <- call_n_times warmup one
     results <- call_n_times runs one
     let (baseline, ours) = unzip results
 
